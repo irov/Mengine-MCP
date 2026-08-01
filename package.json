@@ -1,0 +1,117 @@
+{
+  "name": "mengine-mcp",
+  "displayName": "Mengine MCP",
+  "description": "Control and debug Mengine games with AI agents: launch builds, inspect scenes, inject input, capture frames, hot-reload assets, and debug Python.",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "publisher": "wonderland",
+  "license": "MIT",
+  "homepage": "https://github.com/irov/Mengine-MCP#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/irov/Mengine-MCP.git"
+  },
+  "bugs": {
+    "url": "https://github.com/irov/Mengine-MCP/issues"
+  },
+  "icon": "resources/icon.png",
+  "galleryBanner": {
+    "color": "#15191f",
+    "theme": "dark"
+  },
+  "categories": [
+    "AI",
+    "Debuggers",
+    "Other"
+  ],
+  "keywords": [
+    "mengine",
+    "mcp",
+    "game engine",
+    "ai agent",
+    "automation",
+    "debugging",
+    "python",
+    "hot reload",
+    "codex",
+    "copilot",
+    "model context protocol"
+  ],
+  "engines": {
+    "vscode": "^1.131.0",
+    "node": ">=20"
+  },
+  "main": "./dist/extension.cjs",
+  "bin": {
+    "mengine-mcp": "./dist/mengine-mcp.mjs"
+  },
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Mengine MCP launch profiles can execute application and install commands from the workspace descriptor."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "Mengine MCP requires local application, script, and asset paths."
+    }
+  },
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:mengineMcp.createConfiguration",
+    "onCommand:mengineMcp.openConfiguration"
+  ],
+  "contributes": {
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "mengine.mcp",
+        "label": "Mengine MCP"
+      }
+    ],
+    "commands": [
+      {
+        "command": "mengineMcp.createConfiguration",
+        "title": "Create Configuration",
+        "category": "Mengine MCP"
+      },
+      {
+        "command": "mengineMcp.openConfiguration",
+        "title": "Open Configuration",
+        "category": "Mengine MCP"
+      }
+    ],
+    "jsonValidation": [
+      {
+        "fileMatch": "**/mengine.mcp.json",
+        "url": "./schemas/mengine.mcp.schema.json"
+      }
+    ]
+  },
+  "scripts": {
+    "clean": "node ./scripts/clean.mjs",
+    "build": "node ./scripts/build.mjs",
+    "compile:test": "tsc -p ./tsconfig.test.json",
+    "typecheck": "tsc -p ./tsconfig.json --noEmit && tsc -p ./tsconfig.test.json --noEmit",
+    "test": "npm run compile:test && node --test dist-test/test/*.test.js",
+    "smoke": "node ./scripts/smoke-bundles.cjs",
+    "check": "npm run typecheck && npm test && npm run build && npm run smoke",
+    "vscode:prepublish": "npm run build",
+    "prepackage": "npm run check",
+    "package": "vsce package",
+    "publish:marketplace": "node -e \"console.error('Publish from the GitHub Actions release workflow so the VSIX and Marketplace release stay in sync.'); process.exitCode = 1\""
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.0.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.x",
+    "@types/vscode": "1.125.0",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.28.1",
+    "typescript": "^7.0.2"
+  }
+}

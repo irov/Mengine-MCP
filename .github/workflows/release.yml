@@ -1,0 +1,90 @@
+name: Release Mengine MCP
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the verified VSIX to Visual Studio Marketplace
+        default: false
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Verify release tag matches package version
+        if: github.event_name == 'push'
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node -e "const version = require('./package.json').version; if (process.env.RELEASE_TAG !== 'v' + version) throw new Error('Expected tag v' + version + ', got ' + process.env.RELEASE_TAG);"
+      - run: npm test
+      - run: npm run package
+      - name: Smoke test bundled STDIO server
+        shell: bash
+        run: |
+          test "$(head -n 2 dist/mengine-mcp.mjs | grep -c '^#!')" -eq 1
+          output=$(node dist/mengine-mcp.mjs --config /definitely/missing/mengine.mcp.json 2>&1 || true)
+          echo "$output" | grep -q 'mengine-mcp:'
+      - name: Verify VSIX contents
+        shell: bash
+        run: |
+          vsix=$(find . -maxdepth 1 -name '*.vsix' -print -quit)
+          test -n "$vsix"
+          unzip -l "$vsix" | grep -q 'extension/dist/extension.cjs'
+          unzip -l "$vsix" | grep -q 'extension/dist/mengine-mcp.mjs'
+          unzip -l "$vsix" | grep -q 'extension/mengine.mcp.example.json'
+          unzip -l "$vsix" | grep -q 'extension/schemas/mengine.mcp.schema.json'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mengine-mcp-vsix
+          path: "*.vsix"
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'push' || inputs.publish
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mengine-mcp-vsix
+          path: release
+      - name: Publish VSIX
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: npx vsce publish --packagePath release/*.vsix --skip-duplicate
+      - name: Create GitHub Release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release/*.vsix --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release/*.vsix \
+              --verify-tag \
+              --generate-notes \
+              --title "Mengine MCP $GITHUB_REF_NAME"
+          fi

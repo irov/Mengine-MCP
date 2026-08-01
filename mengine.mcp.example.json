@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "apps": [
+    {
+      "id": "game",
+      "name": "Mengine Game",
+      "profiles": [
+        {
+          "id": "macos-dev",
+          "platform": "macos",
+          "command": "./build/Debug/Game.app/Contents/MacOS/Game",
+          "connectionHost": "127.0.0.1"
+        },
+        {
+          "id": "android-dev",
+          "platform": "android",
+          "command": "adb",
+          "args": [
+            "shell",
+            "am",
+            "start",
+            "-n",
+            "org.example.game/.MengineActivity"
+          ],
+          "portForwardCommand": ["adb", "reverse", "tcp:{mcpPort}", "tcp:{mcpPort}"],
+          "logicHostProfile": "macos-dev"
+        }
+      ],
+      "scriptRoots": [
+        {
+          "path": "./Scripts",
+          "modulePrefix": "",
+          "logicalPrefix": "Scripts"
+        }
+      ],
+      "assetRoots": [
+        {
+          "path": "./Resources",
+          "fileGroup": "game",
+          "logicalPrefix": ""
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run package
+      - name: Smoke test bundled STDIO server
+        shell: bash
+        run: |
+          test "$(head -n 2 dist/mengine-mcp.mjs | grep -c '^#!')" -eq 1
+          output=$(node dist/mengine-mcp.mjs --config /definitely/missing/mengine.mcp.json 2>&1 || true)
+          echo "$output" | grep -q 'mengine-mcp:'
+      - name: Verify VSIX contents
+        shell: bash
+        run: |
+          vsix=$(find . -maxdepth 1 -name '*.vsix' -print -quit)
+          test -n "$vsix"
+          unzip -l "$vsix" | grep -q 'extension/dist/extension.cjs'
+          unzip -l "$vsix" | grep -q 'extension/dist/mengine-mcp.mjs'
+          unzip -l "$vsix" | grep -q 'extension/mengine.mcp.example.json'
+          unzip -l "$vsix" | grep -q 'extension/schemas/mengine.mcp.schema.json'

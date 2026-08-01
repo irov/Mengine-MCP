@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/irov/Mengine-MCP/master/schemas/mengine.mcp.schema.json",
+  "title": "Mengine MCP game descriptor",
+  "description": "Applications, launch profiles, and source roots exposed to Mengine MCP.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "apps"
+  ],
+  "properties": {
+    "version": {
+      "const": 1,
+      "description": "Mengine MCP descriptor format version."
+    },
+    "apps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/application"
+      }
+    }
+  },
+  "$defs": {
+    "command": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    },
+    "rootMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Local path relative to the descriptor directory."
+        },
+        "logicalPrefix": {
+          "type": "string",
+          "default": ""
+        },
+        "fileGroup": {
+          "type": "string",
+          "default": ""
+        },
+        "modulePrefix": {
+          "type": "string",
+          "default": ""
+        }
+      }
+    },
+    "launchProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "platform",
+        "command"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "platform": {
+          "enum": [
+            "win32",
+            "macos",
+            "unix",
+            "gdk",
+            "android",
+            "ios",
+            "ios-simulator"
+          ]
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Executable used to launch this already-built profile."
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "environment": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "installCommand": {
+          "$ref": "#/$defs/command"
+        },
+        "portForwardCommand": {
+          "$ref": "#/$defs/command"
+        },
+        "logicHostProfile": {
+          "type": "string",
+          "description": "Desktop profile used for mobile headless-logic launches."
+        },
+        "connectionHost": {
+          "type": "string",
+          "default": "127.0.0.1"
+        },
+        "allowedRemoteHosts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "connectTimeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 15000
+        }
+      }
+    },
+    "application": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "profiles"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "profiles": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/launchProfile"
+          }
+        },
+        "scriptRoots": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/rootMapping"
+          },
+          "default": []
+        },
+        "assetRoots": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/rootMapping"
+          },
+          "default": []
+        }
+      }
+    }
+  }
+}
