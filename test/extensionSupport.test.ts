@@ -5,17 +5,24 @@ import test from "node:test";
 import {
   CONNECT_CODEX_COMMAND,
   CREATE_CONFIGURATION_COMMAND,
+  DESCRIPTOR_DIRECTORY_NAME,
   DESCRIPTOR_FILE_NAME,
+  DESCRIPTOR_RELATIVE_PATH,
   DISCONNECT_CODEX_COMMAND,
   MCP_PROVIDER_ID,
+  MENGINE_GITIGNORE_FILE_NAME,
   OPEN_CONFIGURATION_COMMAND,
   SHOW_CODEX_STATUS_COMMAND,
   makeServerLabel,
   makeServerVersion,
+  mergeMengineGitignore,
 } from "../src/extensionSupport.js";
 
 test("VS Code provider uses stable descriptor and server identities", () => {
-  assert.equal(DESCRIPTOR_FILE_NAME, "mengine.mcp.json");
+  assert.equal(DESCRIPTOR_DIRECTORY_NAME, ".mengine");
+  assert.equal(DESCRIPTOR_FILE_NAME, "mcp.json");
+  assert.equal(DESCRIPTOR_RELATIVE_PATH, ".mengine/mcp.json");
+  assert.equal(MENGINE_GITIGNORE_FILE_NAME, ".gitignore");
   assert.equal(MCP_PROVIDER_ID, "mengine.mcp");
   assert.equal(CREATE_CONFIGURATION_COMMAND, "mengineMcp.createConfiguration");
   assert.equal(OPEN_CONFIGURATION_COMMAND, "mengineMcp.openConfiguration");
@@ -24,6 +31,18 @@ test("VS Code provider uses stable descriptor and server identities", () => {
   assert.equal(SHOW_CODEX_STATUS_COMMAND, "mengineMcp.showCodexStatus");
   assert.equal(makeServerLabel("My Game"), "Mengine MCP: My Game");
   assert.equal(makeServerVersion("0.1.0", 1234), "0.1.0:1234");
+});
+
+test("Mengine configuration ignores local settings and managed build cache", () => {
+  assert.equal(mergeMengineGitignore(""), ".cache/\nlocal.json\n");
+  assert.equal(
+    mergeMengineGitignore("# local files\n.cache/\n"),
+    "# local files\n.cache/\nlocal.json\n",
+  );
+  assert.equal(
+    mergeMengineGitignore(".cache/\nlocal.json\n"),
+    ".cache/\nlocal.json\n",
+  );
 });
 
 test("extension manifest contributes the registered MCP provider", async () => {
@@ -40,7 +59,7 @@ test("extension manifest contributes the registered MCP provider", async () => {
   assert.equal(`${packageJson.publisher}.${packageJson.name}`, "wonderland.mengine-mcp");
   assert.equal(packageJson.contributes.mcpServerDefinitionProviders[0]?.id, MCP_PROVIDER_ID);
   assert.deepEqual(packageJson.contributes.jsonValidation, [{
-    fileMatch: "**/mengine.mcp.json",
+    fileMatch: "**/.mengine/mcp.json",
     url: "./schemas/mengine.mcp.schema.json",
   }]);
 });

@@ -2,7 +2,7 @@
   "name": "mengine-mcp",
   "displayName": "Mengine MCP",
   "description": "Control and debug Mengine games with AI agents: launch builds, inspect scenes, inject input, capture frames, hot-reload assets, and debug Python.",
-  "version": "0.2.0",
+  "version": "0.3.2",
   "private": true,
   "type": "module",
   "publisher": "wonderland",
@@ -52,7 +52,7 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": false,
-      "description": "Mengine MCP launch profiles can execute application and install commands from the workspace descriptor."
+      "description": "Mengine MCP profiles can build, launch, and install applications from the workspace descriptor."
     },
     "virtualWorkspaces": {
       "supported": false,
@@ -103,7 +103,7 @@
     ],
     "jsonValidation": [
       {
-        "fileMatch": "**/mengine.mcp.json",
+        "fileMatch": "**/.mengine/mcp.json",
         "url": "./schemas/mengine.mcp.schema.json"
       }
     ]

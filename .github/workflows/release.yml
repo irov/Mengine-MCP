@@ -36,7 +36,7 @@ jobs:
         shell: bash
         run: |
           test "$(head -n 2 dist/mengine-mcp.mjs | grep -c '^#!')" -eq 1
-          output=$(node dist/mengine-mcp.mjs --config /definitely/missing/mengine.mcp.json 2>&1 || true)
+          output=$(node dist/mengine-mcp.mjs --config /definitely/missing/.mengine/mcp.json 2>&1 || true)
           echo "$output" | grep -q 'mengine-mcp:'
       - name: Verify VSIX contents
         shell: bash

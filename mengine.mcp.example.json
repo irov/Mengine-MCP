@@ -8,7 +8,11 @@
         {
           "id": "macos-dev",
           "platform": "macos",
-          "command": "./build/Debug/Game.app/Contents/MacOS/Game",
+          "build": {
+            "provider": "mengine",
+            "configuration": "Debug",
+            "deployPath": "./Deploy/MacOS"
+          },
           "connectionHost": "127.0.0.1"
         },
         {

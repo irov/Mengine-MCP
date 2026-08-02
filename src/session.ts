@@ -5,6 +5,7 @@ import { realpath, readFile } from "node:fs/promises";
 import net, { Server, Socket } from "node:net";
 import path from "node:path";
 
+import { BuildManager } from "./build.js";
 import {
   AppDescriptor,
   LaunchProfile,
@@ -75,12 +76,38 @@ export function validateHandshakePayload(payload: unknown, token: string): strin
 type LaunchContext = {
   app: AppDescriptor;
   requestedProfile: LaunchProfile;
-  effectiveProfile: LaunchProfile;
+  effectiveProfile: LaunchProfile & { command: string };
   mode: LaunchMode;
+  cleanup?: () => Promise<void>;
 };
 
 const MOBILE_PLATFORMS = new Set(["android", "ios", "ios-simulator"]);
 const MAX_CAPTURED_LOG_LINES = 5000;
+
+export function makeLaunchArguments(
+  profile: Pick<LaunchProfile, "args" | "platform">,
+  mode: LaunchMode,
+  variables: Record<string, string>,
+): string[] {
+  const args = profile.args.map(value => expandVariables(value, variables));
+
+  if (profile.platform === "android") {
+    args.push(
+      "--es", "mengine.mcp.host", variables.mcpHost!,
+      "--es", "mengine.mcp.port", variables.mcpPort!,
+      "--es", "mengine.mcp.token", variables.mcpToken!,
+      "--es", "mengine.mcp.mode", variables.mcpMode!,
+    );
+  } else if (!MOBILE_PLATFORMS.has(profile.platform)) {
+    if (mode === "hidden_render") {
+      args.push("--cli", "--windowhidden", "--nopause", "--noalreadyrunning");
+    } else if (mode === "headless_logic") {
+      args.push("--cli", "--norender", "--nopause", "--noalreadyrunning");
+    }
+  }
+
+  return args;
+}
 
 export class MengineSession {
   private server: Server | undefined;
@@ -98,6 +125,7 @@ export class MengineSession {
   private readonly logs: string[] = [];
   private handshakeResolve: (() => void) | undefined;
   private handshakeReject: ((error: Error) => void) | undefined;
+  private cleanupPromise: Promise<void> | undefined;
 
   public readonly token = randomBytes(32).toString("hex");
 
@@ -132,21 +160,7 @@ export class MengineSession {
     }
 
     const profile = this.context.effectiveProfile;
-    const args = profile.args.map(value => expandVariables(value, variables));
-    if (profile.platform === "android") {
-      args.push(
-        "--es", "mengine.mcp.host", variables.mcpHost!,
-        "--es", "mengine.mcp.port", variables.mcpPort!,
-        "--es", "mengine.mcp.token", variables.mcpToken!,
-        "--es", "mengine.mcp.mode", variables.mcpMode!,
-      );
-    } else if (!MOBILE_PLATFORMS.has(profile.platform)) {
-      if (this.context.mode === "hidden_render") {
-        args.push("--windowhidden", "--nopause", "--noalreadyrunning");
-      } else if (this.context.mode === "headless_logic") {
-        args.push("--norender", "--nopause", "--noalreadyrunning");
-      }
-    }
+    const args = makeLaunchArguments(profile, this.context.mode, variables);
     const command = expandVariables(profile.command, variables);
     const environment: NodeJS.ProcessEnv = {
       ...process.env,
@@ -177,6 +191,7 @@ export class MengineSession {
         this.handshakeReject?.(new Error(`application exited before MCP handshake (code=${String(code)}, signal=${String(signal)})`));
       }
       this.rejectPending(new MengineRuntimeError("disconnected", "application process exited"));
+      void this.cleanup().catch(error => this.captureLog("mcp", `launch cleanup failed: ${error instanceof Error ? error.message : String(error)}`));
     });
     this.process = child;
 
@@ -287,6 +302,13 @@ export class MengineSession {
     this.server = undefined;
     this.authenticated = false;
     this.rejectPending(new MengineRuntimeError("disconnected", "MCP session closed"));
+  }
+
+  public async cleanup(): Promise<void> {
+    if (this.cleanupPromise === undefined) {
+      this.cleanupPromise = this.context.cleanup?.() ?? Promise.resolve();
+    }
+    await this.cleanupPromise;
   }
 
   private validateConnectionHost(host: string): void {
@@ -470,7 +492,7 @@ export class MengineSession {
   }
 
   private resolveCwd(): string {
-    const cwd = this.context.effectiveProfile.cwd ?? this.descriptor.directory;
+    const cwd = this.context.effectiveProfile.cwd ?? this.descriptor.rootDirectory;
     return resolveDescriptorPath(this.descriptor, cwd);
   }
 
@@ -492,8 +514,11 @@ export class MengineSession {
 
 export class SessionManager {
   private readonly sessions = new Map<string, MengineSession>();
+  private readonly builds: BuildManager;
 
-  public constructor(private readonly descriptor: LoadedDescriptor) {}
+  public constructor(private readonly descriptor: LoadedDescriptor) {
+    this.builds = new BuildManager(descriptor);
+  }
 
   public list(): Array<{
     id: string;
@@ -519,27 +544,50 @@ export class SessionManager {
       throw new Error(`application '${appId}' already has an active MCP session`);
     }
     existing?.close();
+    await existing?.cleanup();
 
     const app = findApp(this.descriptor, appId);
     const requestedProfile = findProfile(app, profileId);
-    let effectiveProfile = requestedProfile;
+    let effectiveProfileSource = requestedProfile;
 
     if (mode === "headless_logic" && MOBILE_PLATFORMS.has(requestedProfile.platform)) {
       if (requestedProfile.logicHostProfile === undefined) {
         throw new MengineRuntimeError("unsupported", `profile '${profileId}' has no desktop logicHostProfile`);
       }
-      effectiveProfile = findProfile(app, requestedProfile.logicHostProfile);
+      effectiveProfileSource = findProfile(app, requestedProfile.logicHostProfile);
     }
+    const resolved = await this.resolveLaunchProfile(effectiveProfileSource);
 
-    const session = new MengineSession(this.descriptor, { app, requestedProfile, effectiveProfile, mode });
+    const session = new MengineSession(this.descriptor, {
+      app,
+      requestedProfile,
+      effectiveProfile: resolved.profile,
+      mode,
+      ...(resolved.cleanup === undefined ? {} : { cleanup: resolved.cleanup }),
+    });
     this.sessions.set(appId, session);
 
     try {
       return await session.launch();
     } catch (error) {
       await session.stop(true, 1_000).catch(() => session.close());
+      await session.cleanup().catch(() => undefined);
       throw error;
     }
+  }
+
+  public async build(appId: string, profileId: string): Promise<unknown> {
+    this.requireInactiveApplication(appId);
+    const app = findApp(this.descriptor, appId);
+    const profile = findProfile(app, profileId);
+    return this.builds.build(profile);
+  }
+
+  public async cleanBuild(appId: string, profileId: string): Promise<unknown> {
+    this.requireInactiveApplication(appId);
+    const app = findApp(this.descriptor, appId);
+    findProfile(app, profileId);
+    return this.builds.clean(profileId);
   }
 
   public async install(appId: string, profileId: string): Promise<unknown> {
@@ -557,11 +605,16 @@ export class SessionManager {
       mcpToken: "",
       mcpMode: "visible",
     }));
-    return runCommand(command, profile.cwd === undefined ? this.descriptor.directory : resolveDescriptorPath(this.descriptor, profile.cwd), process.env);
+    return runCommand(command, profile.cwd === undefined ? this.descriptor.rootDirectory : resolveDescriptorPath(this.descriptor, profile.cwd), process.env);
   }
 
   public async stop(appId: string, force: boolean, gracefulTimeoutMs: number): Promise<SessionStatus> {
-    return this.requireSession(appId).stop(force, gracefulTimeoutMs);
+    const session = this.requireSession(appId);
+    try {
+      return await session.stop(force, gracefulTimeoutMs);
+    } finally {
+      await session.cleanup();
+    }
   }
 
   public request(appId: string, method: string, params: unknown, timeoutMs?: number, binary?: Buffer): Promise<unknown> {
@@ -589,7 +642,10 @@ export class SessionManager {
   }
 
   public async close(): Promise<void> {
-    await Promise.all([...this.sessions.values()].map(session => session.stop(true, 1_000).catch(() => session.close())));
+    await Promise.all([...this.sessions.values()].map(async session => {
+      await session.stop(true, 1_000).catch(() => session.close());
+      await session.cleanup().catch(() => undefined);
+    }));
     this.sessions.clear();
   }
 
@@ -600,6 +656,43 @@ export class SessionManager {
     }
     return session;
   }
+
+  private requireInactiveApplication(appId: string): void {
+    const session = this.sessions.get(appId);
+    if (session !== undefined && !["stopped", "failed"].includes(session.status().state)) {
+      throw new MengineRuntimeError("invalid_request", `application '${appId}' has an active MCP session`);
+    }
+  }
+
+  private async resolveLaunchProfile(profile: LaunchProfile): Promise<{
+    profile: LaunchProfile & { command: string };
+    cleanup?: () => Promise<void>;
+  }> {
+    if (profile.command !== undefined) {
+      return {
+        profile: {
+          ...profile,
+          command: resolveExecutableCommand(this.descriptor, profile.command),
+        },
+      };
+    }
+
+    const managed = await this.builds.resolveManagedLaunch(profile);
+    return {
+      profile: { ...profile, command: managed.command, cwd: managed.cwd },
+      cleanup: managed.cleanup,
+    };
+  }
+}
+
+export function resolveExecutableCommand(descriptor: LoadedDescriptor, command: string): string {
+  if (path.isAbsolute(command)) {
+    return command;
+  }
+  if (command.startsWith(".") || command.includes("/") || command.includes("\\")) {
+    return resolveDescriptorPath(descriptor, command);
+  }
+  return command;
 }
 
 async function readFromRoots(

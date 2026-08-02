@@ -6,6 +6,8 @@ export type MengineRuntimeErrorCode =
   | "timeout"
   | "execution_error"
   | "restart_required"
+  | "build_required"
+  | "build_in_progress"
   | "disconnected"
   | "authentication_failed"
   | "invalid_request";

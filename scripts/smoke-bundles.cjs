@@ -14,7 +14,7 @@ assert.equal(serverLines.filter(line => line.startsWith("#!")).length, 1);
 const serverResult = spawnSync(process.execPath, [
   serverPath,
   "--config",
-  path.join(repositoryRoot, "definitely-missing-mengine.mcp.json"),
+  path.join(repositoryRoot, "definitely-missing", ".mengine", "mcp.json"),
 ], {
   encoding: "utf8",
 });
@@ -99,7 +99,7 @@ try {
     },
     extension: {
       packageJSON: {
-        version: "0.2.0",
+        version: "0.3.2",
       },
     },
     extensionUri: {},

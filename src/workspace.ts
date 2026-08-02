@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { DESCRIPTOR_FILE_NAME } from "./extensionSupport.js";
+import { DESCRIPTOR_RELATIVE_PATH } from "./extensionSupport.js";
 
 export type DescriptorSource = "argument" | "environment" | "workspace" | "missing";
 
@@ -66,7 +66,7 @@ export function findWorkspaceDescriptor(
   let directory = path.resolve(startDirectory);
 
   for (;;) {
-    const candidate = path.join(directory, DESCRIPTOR_FILE_NAME);
+    const candidate = path.join(directory, DESCRIPTOR_RELATIVE_PATH);
     if (fileExists(candidate)) {
       return candidate;
     }

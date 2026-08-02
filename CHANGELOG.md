@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- Add profile-scoped managed macOS builds under `.mengine/.cache/build/<profileId>` with explicit `app_build` and `app_clean` tools.
+- Allow launch profiles to use a managed build instead of a committed executable path.
+- Create `.mengine/.gitignore` rules for the disposable build cache and machine-local `local.json`.
+- Stage an ephemeral ad-hoc-signed macOS launch copy outside SMB volumes and remove it with the session lifecycle.
+
+## 0.3.2
+
+- Use the existing desktop `--cli` launch argument for silent-dialog behavior in hidden and headless modes; no separate environment variable is introduced.
+
+## 0.3.1
+
+- Pass the existing `--cli` argument to hidden and headless desktop runtimes so hosts suppress modal startup failures before MCP initialization.
+
+## 0.3.0
+
+- Store the only supported game descriptor at `.mengine/mcp.json` instead of the workspace root.
+- Resolve descriptor commands and source roots relative to the game workspace rather than the hidden configuration directory.
+- Create and watch the `.mengine` directory from the VS Code extension; legacy root descriptors are not discovered.
+
 ## 0.2.0
 
 - Automatically maintain a global managed Codex server from trusted workspaces containing `mengine.mcp.json`.

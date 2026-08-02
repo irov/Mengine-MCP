@@ -2,6 +2,11 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import * as z from "zod/v4";
 
+import {
+  DESCRIPTOR_DIRECTORY_NAME,
+  DESCRIPTOR_FILE_NAME,
+} from "./extensionSupport.js";
+
 const CommandSchema = z.array(z.string()).min(1);
 
 const RootMappingSchema = z.object({
@@ -11,10 +16,25 @@ const RootMappingSchema = z.object({
   modulePrefix: z.string().default(""),
 });
 
+const ProfileIdSchema = z.string().regex(
+  /^[A-Za-z0-9][A-Za-z0-9._-]*$/u,
+  "profile ids may contain only letters, numbers, '.', '_', and '-'",
+);
+
+const MengineBuildSchema = z.object({
+  provider: z.literal("mengine"),
+  configuration: z.literal("Debug").default("Debug"),
+  deployPath: z.string().min(1),
+  buildNumber: z.string().regex(/^\d+$/u).default("1"),
+  buildVersion: z.string().regex(/^\d+\.\d+\.\d+$/u).default("1.0.0"),
+  cmakeArguments: z.array(z.string()).default([]),
+});
+
 const LaunchProfileSchema = z.object({
-  id: z.string().min(1),
+  id: ProfileIdSchema,
   platform: z.enum(["win32", "macos", "unix", "gdk", "android", "ios", "ios-simulator"]),
-  command: z.string().min(1),
+  command: z.string().min(1).optional(),
+  build: MengineBuildSchema.optional(),
   args: z.array(z.string()).default([]),
   cwd: z.string().optional(),
   environment: z.record(z.string(), z.string()).default({}),
@@ -24,6 +44,8 @@ const LaunchProfileSchema = z.object({
   connectionHost: z.string().default("127.0.0.1"),
   allowedRemoteHosts: z.array(z.string()).default([]),
   connectTimeoutMs: z.number().int().positive().default(15_000),
+}).refine(profile => profile.command !== undefined || profile.build !== undefined, {
+  message: "a launch profile requires either 'command' or 'build'",
 });
 
 const AppDescriptorSchema = z.object({
@@ -47,6 +69,7 @@ export type MengineMcpDescriptor = z.infer<typeof DescriptorSchema>;
 export type LoadedDescriptor = {
   filePath: string;
   directory: string;
+  rootDirectory: string;
   value: MengineMcpDescriptor;
 };
 
@@ -63,6 +86,7 @@ export async function loadDescriptor(filePath: string): Promise<LoadedDescriptor
 
   const value = DescriptorSchema.parse(parsed);
   const ids = new Set<string>();
+  const managedProfileIds = new Set<string>();
 
   for (const app of value.apps) {
     if (ids.has(app.id)) {
@@ -76,6 +100,13 @@ export async function loadDescriptor(filePath: string): Promise<LoadedDescriptor
         throw new Error(`duplicate profile '${profile.id}' for application '${app.id}'`);
       }
       profileIds.add(profile.id);
+
+      if (profile.build !== undefined) {
+        if (managedProfileIds.has(profile.id)) {
+          throw new Error(`managed build profile id '${profile.id}' must be unique in ${absolutePath}`);
+        }
+        managedProfileIds.add(profile.id);
+      }
     }
 
     for (const profile of app.profiles) {
@@ -88,12 +119,24 @@ export async function loadDescriptor(filePath: string): Promise<LoadedDescriptor
   return {
     filePath: absolutePath,
     directory: path.dirname(absolutePath),
+    rootDirectory: resolveDescriptorRoot(absolutePath),
     value,
   };
 }
 
 export function resolveDescriptorPath(descriptor: LoadedDescriptor, value: string): string {
-  return path.isAbsolute(value) ? value : path.resolve(descriptor.directory, value);
+  return path.isAbsolute(value) ? value : path.resolve(descriptor.rootDirectory, value);
+}
+
+function resolveDescriptorRoot(filePath: string): string {
+  const directory = path.dirname(filePath);
+
+  if (path.basename(filePath) === DESCRIPTOR_FILE_NAME
+    && path.basename(directory) === DESCRIPTOR_DIRECTORY_NAME) {
+    return path.dirname(directory);
+  }
+
+  return directory;
 }
 
 export function findApp(descriptor: LoadedDescriptor, appId: string): AppDescriptor {

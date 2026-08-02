@@ -9,6 +9,8 @@ import {
 import type { SessionManager } from "../src/session.js";
 
 const EXPECTED_TOOLS = [
+  "app_build",
+  "app_clean",
   "app_install",
   "app_launch",
   "app_list",
@@ -54,7 +56,7 @@ const EXPECTED_TOOLS = [
 
 const configuredStatus = makeMengineMcpStatus(
   "/workspace/game",
-  "/workspace/game/mengine.mcp.json",
+  "/workspace/game/.mengine/mcp.json",
   "workspace",
   [{ id: "game", profiles: ["macos-debug"] }],
 );

@@ -291,6 +291,20 @@ export function createMengineMcpServer(manager: SessionManager, status: MengineM
     annotations: { destructiveHint: true, idempotentHint: true },
   }, async ({ appId, profileId }) => invoke(() => manager.install(appId, profileId)));
 
+  server.registerTool("app_build", {
+    title: "Build Mengine application",
+    description: "Incrementally build a managed Development profile in .mengine/.cache/build/<profileId>.",
+    inputSchema: z.object({ appId: z.string().min(1), profileId: z.string().min(1) }),
+    annotations: { destructiveHint: true, idempotentHint: true },
+  }, async ({ appId, profileId }) => invoke(() => manager.build(appId, profileId)));
+
+  server.registerTool("app_clean", {
+    title: "Clean Mengine build",
+    description: "Delete only the managed cache directory for one build profile.",
+    inputSchema: z.object({ appId: z.string().min(1), profileId: z.string().min(1) }),
+    annotations: { destructiveHint: true, idempotentHint: true },
+  }, async ({ appId, profileId }) => invoke(() => manager.cleanBuild(appId, profileId)));
+
   server.registerTool("app_launch", {
     title: "Launch Mengine application",
     description: "Launch an existing application artifact and wait for authenticated MCPPlugin connection.",
@@ -424,8 +438,8 @@ function createBaseServer(status: MengineMcpStatus, configured: boolean): McpSer
     { name: "mengine-mcp", version: MENGINE_MCP_VERSION },
     {
       instructions: configured
-        ? "Call app_list before runtime work, then launch an existing artifact with app_launch. Use hidden_render for screenshots and headless_logic for logic-only checks. Builds are outside this MCP server."
-        : "No mengine.mcp.json was found from this Codex working directory. Only mengine_status is available; open a configured Mengine project and start a new agent.",
+        ? "Call app_list before runtime work. Managed profiles use app_build before app_launch; command profiles launch existing artifacts directly. Use hidden_render for screenshots and headless_logic for logic-only checks."
+        : "No .mengine/mcp.json was found from this Codex working directory. Only mengine_status is available; open a configured Mengine project and start a new agent.",
     },
   );
 

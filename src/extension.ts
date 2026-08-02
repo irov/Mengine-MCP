@@ -10,13 +10,17 @@ import {
 import {
   CONNECT_CODEX_COMMAND,
   CREATE_CONFIGURATION_COMMAND,
+  DESCRIPTOR_DIRECTORY_NAME,
   DESCRIPTOR_FILE_NAME,
+  DESCRIPTOR_RELATIVE_PATH,
   DISCONNECT_CODEX_COMMAND,
   MCP_PROVIDER_ID,
+  MENGINE_GITIGNORE_FILE_NAME,
   OPEN_CONFIGURATION_COMMAND,
   SHOW_CODEX_STATUS_COMMAND,
   makeServerLabel,
   makeServerVersion,
+  mergeMengineGitignore,
 } from "./extensionSupport.js";
 
 class MengineMcpServerProvider implements vscode.McpServerDefinitionProvider<vscode.McpStdioServerDefinition>, vscode.Disposable {
@@ -47,7 +51,7 @@ class MengineMcpServerProvider implements vscode.McpServerDefinitionProvider<vsc
         break;
       }
 
-      const descriptorUri = vscode.Uri.joinPath(workspaceFolder.uri, DESCRIPTOR_FILE_NAME);
+      const descriptorUri = makeDescriptorUri(workspaceFolder);
       const descriptorStat = await statFile(descriptorUri);
 
       if (descriptorStat === undefined) {
@@ -99,7 +103,7 @@ class MengineMcpServerProvider implements vscode.McpServerDefinitionProvider<vsc
     this.disposeWatchers();
 
     for (const workspaceFolder of vscode.workspace.workspaceFolders ?? []) {
-      const pattern = new vscode.RelativePattern(workspaceFolder, DESCRIPTOR_FILE_NAME);
+      const pattern = new vscode.RelativePattern(workspaceFolder, DESCRIPTOR_RELATIVE_PATH);
       const watcher = vscode.workspace.createFileSystemWatcher(pattern);
       const refresh = (): void => {
         this.refresh();
@@ -222,7 +226,7 @@ async function connectCodexInteractively(registration: MengineCodexRegistrationM
     return;
   }
   if (!await hasConfiguredWorkspace()) {
-    void vscode.window.showErrorMessage(`Open a workspace containing ${DESCRIPTOR_FILE_NAME} before connecting Codex.`);
+    void vscode.window.showErrorMessage(`Open a workspace containing ${DESCRIPTOR_RELATIVE_PATH} before connecting Codex.`);
     return;
   }
 
@@ -277,7 +281,7 @@ async function showCodexStatus(
 
 async function hasConfiguredWorkspace(): Promise<boolean> {
   for (const workspaceFolder of vscode.workspace.workspaceFolders ?? []) {
-    const descriptorUri = vscode.Uri.joinPath(workspaceFolder.uri, DESCRIPTOR_FILE_NAME);
+    const descriptorUri = makeDescriptorUri(workspaceFolder);
     if (await statFile(descriptorUri) !== undefined) {
       return true;
     }
@@ -293,12 +297,15 @@ async function createConfiguration(context: vscode.ExtensionContext): Promise<bo
     return false;
   }
 
-  const descriptorUri = vscode.Uri.joinPath(workspaceFolder.uri, DESCRIPTOR_FILE_NAME);
+  const descriptorDirectoryUri = vscode.Uri.joinPath(workspaceFolder.uri, DESCRIPTOR_DIRECTORY_NAME);
+  const descriptorUri = makeDescriptorUri(workspaceFolder);
+  await vscode.workspace.fs.createDirectory(descriptorDirectoryUri);
+  await ensureMengineGitignore(descriptorDirectoryUri);
   const descriptorStat = await statFile(descriptorUri);
 
   if (descriptorStat !== undefined) {
     await openConfiguration(descriptorUri);
-    void vscode.window.showInformationMessage(`${DESCRIPTOR_FILE_NAME} already exists in ${workspaceFolder.name}.`);
+    void vscode.window.showInformationMessage(`${DESCRIPTOR_RELATIVE_PATH} already exists in ${workspaceFolder.name}.`);
 
     return false;
   }
@@ -307,9 +314,27 @@ async function createConfiguration(context: vscode.ExtensionContext): Promise<bo
   const template = await vscode.workspace.fs.readFile(templateUri);
   await vscode.workspace.fs.writeFile(descriptorUri, template);
   await openConfiguration(descriptorUri);
-  void vscode.window.showInformationMessage(`Created ${DESCRIPTOR_FILE_NAME} in ${workspaceFolder.name}.`);
+  void vscode.window.showInformationMessage(`Created ${DESCRIPTOR_RELATIVE_PATH} in ${workspaceFolder.name}.`);
 
   return true;
+}
+
+async function ensureMengineGitignore(descriptorDirectoryUri: vscode.Uri): Promise<void> {
+  const gitignoreUri = vscode.Uri.joinPath(descriptorDirectoryUri, MENGINE_GITIGNORE_FILE_NAME);
+  let source = "";
+
+  try {
+    source = Buffer.from(await vscode.workspace.fs.readFile(gitignoreUri)).toString("utf8");
+  } catch (error) {
+    if (!(error instanceof vscode.FileSystemError) || error.code !== "FileNotFound") {
+      throw error;
+    }
+  }
+
+  const updated = mergeMengineGitignore(source);
+  if (updated !== source) {
+    await vscode.workspace.fs.writeFile(gitignoreUri, Buffer.from(updated, "utf8"));
+  }
 }
 
 async function selectWorkspaceFolder(): Promise<vscode.WorkspaceFolder | undefined> {
@@ -336,7 +361,7 @@ async function openWorkspaceConfiguration(): Promise<void> {
   const configurations: Array<{ workspaceFolder: vscode.WorkspaceFolder; uri: vscode.Uri }> = [];
 
   for (const workspaceFolder of vscode.workspace.workspaceFolders ?? []) {
-    const uri = vscode.Uri.joinPath(workspaceFolder.uri, DESCRIPTOR_FILE_NAME);
+    const uri = makeDescriptorUri(workspaceFolder);
     const descriptorStat = await statFile(uri);
 
     if (descriptorStat !== undefined) {
@@ -346,7 +371,7 @@ async function openWorkspaceConfiguration(): Promise<void> {
 
   if (configurations.length === 0) {
     const action = await vscode.window.showInformationMessage(
-      `No ${DESCRIPTOR_FILE_NAME} was found at a workspace root.`,
+      `No ${DESCRIPTOR_RELATIVE_PATH} was found in a workspace.`,
       "Create Configuration",
     );
 
@@ -374,6 +399,14 @@ async function openWorkspaceConfiguration(): Promise<void> {
   if (selected !== undefined) {
     await openConfiguration(selected.uri);
   }
+}
+
+function makeDescriptorUri(workspaceFolder: vscode.WorkspaceFolder): vscode.Uri {
+  return vscode.Uri.joinPath(
+    workspaceFolder.uri,
+    DESCRIPTOR_DIRECTORY_NAME,
+    DESCRIPTOR_FILE_NAME,
+  );
 }
 
 async function statFile(uri: vscode.Uri): Promise<vscode.FileStat | undefined> {

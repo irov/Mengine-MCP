@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/irov/Mengine-MCP/master/schemas/mengine.mcp.schema.json",
-  "title": "Mengine MCP game descriptor",
-  "description": "Applications, launch profiles, and source roots exposed to Mengine MCP.",
+  "title": "Mengine MCP game descriptor (.mengine/mcp.json)",
+  "description": "Applications, managed build or launch profiles, and game-root-relative source mappings exposed to Mengine MCP.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -30,6 +30,45 @@
         "type": "string"
       }
     },
+    "mengineBuild": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "deployPath"
+      ],
+      "properties": {
+        "provider": {
+          "const": "mengine"
+        },
+        "configuration": {
+          "const": "Debug",
+          "default": "Debug"
+        },
+        "deployPath": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Deploy directory relative to the game workspace root."
+        },
+        "buildNumber": {
+          "type": "string",
+          "pattern": "^[0-9]+$",
+          "default": "1"
+        },
+        "buildVersion": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+          "default": "1.0.0"
+        },
+        "cmakeArguments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      }
+    },
     "rootMapping": {
       "type": "object",
       "additionalProperties": false,
@@ -40,7 +79,7 @@
         "path": {
           "type": "string",
           "minLength": 1,
-          "description": "Local path relative to the descriptor directory."
+          "description": "Local path relative to the game workspace root."
         },
         "logicalPrefix": {
           "type": "string",
@@ -61,13 +100,24 @@
       "additionalProperties": false,
       "required": [
         "id",
-        "platform",
-        "command"
+        "platform"
+      ],
+      "anyOf": [
+        {
+          "required": [
+            "command"
+          ]
+        },
+        {
+          "required": [
+            "build"
+          ]
+        }
       ],
       "properties": {
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
         },
         "platform": {
           "enum": [
@@ -85,6 +135,9 @@
           "minLength": 1,
           "description": "Executable used to launch this already-built profile."
         },
+        "build": {
+          "$ref": "#/$defs/mengineBuild"
+        },
         "args": {
           "type": "array",
           "items": {
@@ -93,7 +146,8 @@
           "default": []
         },
         "cwd": {
-          "type": "string"
+          "type": "string",
+          "description": "Working directory relative to the game workspace root."
         },
         "environment": {
           "type": "object",

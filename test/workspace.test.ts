@@ -31,7 +31,7 @@ test("descriptor resolution uses environment before workspace discovery", () => 
 });
 
 test("workspace discovery walks from a nested Codex cwd to the descriptor", () => {
-  const expected = path.resolve("/workspace/game/mengine.mcp.json");
+  const expected = path.resolve("/workspace/game/.mengine/mcp.json");
   const resolution = resolveDescriptor({
     argv: ["node", "server"],
     cwd: "/workspace/game/Game/Scripts",
@@ -42,6 +42,19 @@ test("workspace discovery walks from a nested Codex cwd to the descriptor", () =
   assert.equal(resolution.filePath, expected);
   assert.equal(resolution.source, "workspace");
   assert.equal(resolution.explicit, false);
+});
+
+test("workspace discovery does not accept the legacy root descriptor", () => {
+  const legacy = path.resolve("/workspace/game/mengine.mcp.json");
+  const resolution = resolveDescriptor({
+    argv: ["node", "server"],
+    cwd: "/workspace/game/Game/Scripts",
+    environment: {},
+    fileExists: candidate => candidate === legacy,
+  });
+
+  assert.equal(resolution.filePath, undefined);
+  assert.equal(resolution.source, "missing");
 });
 
 test("workspace discovery is nonfatal when no descriptor exists", () => {
