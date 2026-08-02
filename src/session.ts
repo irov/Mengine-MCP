@@ -90,6 +90,7 @@ export class MengineSession {
   private readonly pending = new Map<number, PendingRequest>();
   private requestId = 1;
   private authenticated = false;
+  private handshakeCompleted = false;
   private capabilities: string[] = [];
   private state: SessionStatus["state"] = "launching";
   private exitCode: number | null | undefined;
@@ -171,8 +172,8 @@ export class MengineSession {
     child.once("exit", (code, signal) => {
       this.exitCode = code;
       this.exitSignal = signal;
-      this.state = this.authenticated ? "stopped" : "failed";
-      if (!this.authenticated) {
+      this.state = this.handshakeCompleted ? "stopped" : "failed";
+      if (!this.handshakeCompleted) {
         this.handshakeReject?.(new Error(`application exited before MCP handshake (code=${String(code)}, signal=${String(signal)})`));
       }
       this.rejectPending(new MengineRuntimeError("disconnected", "application process exited"));
@@ -392,6 +393,7 @@ export class MengineSession {
       return;
     }
     this.authenticated = true;
+    this.handshakeCompleted = true;
     this.state = "connected";
     this.socket?.write(encodeJsonFrame(MncpFrameType.Response, frame.requestId, {
       result: { protocol: 1, authenticated: true },

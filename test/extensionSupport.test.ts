@@ -3,10 +3,13 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  CONNECT_CODEX_COMMAND,
   CREATE_CONFIGURATION_COMMAND,
   DESCRIPTOR_FILE_NAME,
+  DISCONNECT_CODEX_COMMAND,
   MCP_PROVIDER_ID,
   OPEN_CONFIGURATION_COMMAND,
+  SHOW_CODEX_STATUS_COMMAND,
   makeServerLabel,
   makeServerVersion,
 } from "../src/extensionSupport.js";
@@ -16,6 +19,9 @@ test("VS Code provider uses stable descriptor and server identities", () => {
   assert.equal(MCP_PROVIDER_ID, "mengine.mcp");
   assert.equal(CREATE_CONFIGURATION_COMMAND, "mengineMcp.createConfiguration");
   assert.equal(OPEN_CONFIGURATION_COMMAND, "mengineMcp.openConfiguration");
+  assert.equal(CONNECT_CODEX_COMMAND, "mengineMcp.connectCodex");
+  assert.equal(DISCONNECT_CODEX_COMMAND, "mengineMcp.disconnectCodex");
+  assert.equal(SHOW_CODEX_STATUS_COMMAND, "mengineMcp.showCodexStatus");
   assert.equal(makeServerLabel("My Game"), "Mengine MCP: My Game");
   assert.equal(makeServerVersion("0.1.0", 1234), "0.1.0:1234");
 });

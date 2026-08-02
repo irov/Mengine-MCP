@@ -3,10 +3,18 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 
 import {
+  MengineCodexRegistrationManager,
+  UnmanagedCodexMcpRegistrationError,
+  formatError,
+} from "./codexRegistration.js";
+import {
+  CONNECT_CODEX_COMMAND,
   CREATE_CONFIGURATION_COMMAND,
   DESCRIPTOR_FILE_NAME,
+  DISCONNECT_CODEX_COMMAND,
   MCP_PROVIDER_ID,
   OPEN_CONFIGURATION_COMMAND,
+  SHOW_CODEX_STATUS_COMMAND,
   makeServerLabel,
   makeServerVersion,
 } from "./extensionSupport.js";
@@ -18,11 +26,15 @@ class MengineMcpServerProvider implements vscode.McpServerDefinitionProvider<vsc
 
   public readonly onDidChangeMcpServerDefinitions = this.didChangeEmitter.event;
 
-  public constructor(private readonly context: vscode.ExtensionContext) {
+  public constructor(
+    private readonly context: vscode.ExtensionContext,
+    private readonly onDescriptorChange: () => void,
+  ) {
     this.rebuildWatchers();
     this.disposables.push(vscode.workspace.onDidChangeWorkspaceFolders(() => {
       this.rebuildWatchers();
       this.refresh();
+      this.onDescriptorChange();
     }));
   }
 
@@ -89,9 +101,13 @@ class MengineMcpServerProvider implements vscode.McpServerDefinitionProvider<vsc
     for (const workspaceFolder of vscode.workspace.workspaceFolders ?? []) {
       const pattern = new vscode.RelativePattern(workspaceFolder, DESCRIPTOR_FILE_NAME);
       const watcher = vscode.workspace.createFileSystemWatcher(pattern);
-      watcher.onDidCreate(() => this.refresh());
-      watcher.onDidChange(() => this.refresh());
-      watcher.onDidDelete(() => this.refresh());
+      const refresh = (): void => {
+        this.refresh();
+        this.onDescriptorChange();
+      };
+      watcher.onDidCreate(refresh);
+      watcher.onDidChange(refresh);
+      watcher.onDidDelete(refresh);
       this.watchers.push(watcher);
     }
   }
@@ -106,9 +122,15 @@ class MengineMcpServerProvider implements vscode.McpServerDefinitionProvider<vsc
 }
 
 export function activate(context: vscode.ExtensionContext): void {
-  const provider = new MengineMcpServerProvider(context);
+  const output = vscode.window.createOutputChannel("Mengine MCP");
+  const registration = new MengineCodexRegistrationManager(context, output);
+  const reconcile = (): void => {
+    void reconcileCodexRegistration(context, registration, output);
+  };
+  const provider = new MengineMcpServerProvider(context, reconcile);
 
   context.subscriptions.push(
+    output,
     provider,
     vscode.lm.registerMcpServerDefinitionProvider(MCP_PROVIDER_ID, provider),
     vscode.commands.registerCommand(CREATE_CONFIGURATION_COMMAND, async () => {
@@ -121,7 +143,147 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(OPEN_CONFIGURATION_COMMAND, async () => {
       await openWorkspaceConfiguration();
     }),
+    vscode.commands.registerCommand(CONNECT_CODEX_COMMAND, async () => {
+      await connectCodexInteractively(registration);
+    }),
+    vscode.commands.registerCommand(DISCONNECT_CODEX_COMMAND, async () => {
+      if (!vscode.workspace.isTrusted) {
+        void vscode.window.showErrorMessage("Trust this workspace before changing the Mengine MCP Codex registration.");
+        return;
+      }
+      try {
+        const disconnected = await registration.disconnect();
+        void vscode.window.showInformationMessage(disconnected
+          ? "Mengine MCP was disconnected from Codex. Restart Codex to remove its tools from active sessions."
+          : "Mengine MCP is not registered in Codex.");
+      } catch (error) {
+        void vscode.window.showErrorMessage(`Could not disconnect Mengine MCP from Codex: ${formatError(error)}`);
+      }
+    }),
+    vscode.commands.registerCommand(SHOW_CODEX_STATUS_COMMAND, async () => {
+      if (!vscode.workspace.isTrusted) {
+        void vscode.window.showErrorMessage("Trust this workspace before reading the Mengine MCP Codex registration.");
+        return;
+      }
+      await showCodexStatus(registration, output);
+    }),
+    vscode.workspace.onDidGrantWorkspaceTrust(reconcile),
   );
+
+  reconcile();
+}
+
+async function reconcileCodexRegistration(
+  context: vscode.ExtensionContext,
+  registration: MengineCodexRegistrationManager,
+  output: vscode.OutputChannel,
+): Promise<void> {
+  if (!vscode.workspace.isTrusted || !await hasConfiguredWorkspace()) {
+    return;
+  }
+
+  try {
+    const changed = await registration.reconcile();
+    if (changed) {
+      const noticeKey = "mengineMcp.codexConnectedNoticeShown";
+      if (!context.globalState.get<boolean>(noticeKey)) {
+        await context.globalState.update(noticeKey, true);
+        void vscode.window.showInformationMessage(
+          "Mengine MCP was connected to Codex. Start a new agent or restart the Codex extension to use its tools.",
+        );
+      }
+    }
+  } catch (error) {
+    const version = String(context.extension.packageJSON.version);
+    const reason = error instanceof UnmanagedCodexMcpRegistrationError ? "unmanaged" : "unavailable";
+    const noticeKey = `mengineMcp.codexNotice.${version}.${reason}`;
+    if (context.globalState.get<boolean>(noticeKey)) {
+      return;
+    }
+
+    await context.globalState.update(noticeKey, true);
+    output.appendLine(`Mengine MCP Codex registration needs attention: ${formatError(error)}`);
+    const action = await vscode.window.showWarningMessage(
+      `Mengine MCP could not connect to Codex automatically: ${formatError(error)}`,
+      "Connect Codex",
+      "Show Status",
+    );
+    if (action === "Connect Codex") {
+      await vscode.commands.executeCommand(CONNECT_CODEX_COMMAND);
+    } else if (action === "Show Status") {
+      await vscode.commands.executeCommand(SHOW_CODEX_STATUS_COMMAND);
+    }
+  }
+}
+
+async function connectCodexInteractively(registration: MengineCodexRegistrationManager): Promise<void> {
+  if (!vscode.workspace.isTrusted) {
+    void vscode.window.showErrorMessage("Trust this workspace before connecting Mengine MCP to Codex.");
+    return;
+  }
+  if (!await hasConfiguredWorkspace()) {
+    void vscode.window.showErrorMessage(`Open a workspace containing ${DESCRIPTOR_FILE_NAME} before connecting Codex.`);
+    return;
+  }
+
+  try {
+    let result;
+    try {
+      result = await registration.connect();
+    } catch (error) {
+      if (!(error instanceof UnmanagedCodexMcpRegistrationError)) {
+        throw error;
+      }
+
+      const choice = await vscode.window.showWarningMessage(
+        `A Codex MCP server named 'mengine' already exists and is not managed by this extension. Replace it?`,
+        { modal: true },
+        "Replace",
+      );
+      if (choice !== "Replace") {
+        return;
+      }
+      result = await registration.connect({ replaceUnmanaged: true });
+    }
+
+    void vscode.window.showInformationMessage(result.changed
+      ? "Mengine MCP was connected to Codex. Start a new agent or restart the Codex extension."
+      : "Mengine MCP is already connected to Codex.");
+  } catch (error) {
+    void vscode.window.showErrorMessage(`Could not connect Mengine MCP to Codex: ${formatError(error)}`);
+  }
+}
+
+async function showCodexStatus(
+  registration: MengineCodexRegistrationManager,
+  output: vscode.OutputChannel,
+): Promise<void> {
+  try {
+    const status = await registration.getStatus();
+    output.appendLine(JSON.stringify(status, null, 2));
+    const show = status.managed && status.upToDate
+      ? vscode.window.showInformationMessage
+      : vscode.window.showWarningMessage;
+    const action = await show(status.message, "Show Output");
+    if (action === "Show Output") {
+      output.show(true);
+    }
+  } catch (error) {
+    output.appendLine(`Could not read Codex MCP status: ${formatError(error)}`);
+    output.show(true);
+    void vscode.window.showErrorMessage(`Could not read Mengine MCP Codex status: ${formatError(error)}`);
+  }
+}
+
+async function hasConfiguredWorkspace(): Promise<boolean> {
+  for (const workspaceFolder of vscode.workspace.workspaceFolders ?? []) {
+    const descriptorUri = vscode.Uri.joinPath(workspaceFolder.uri, DESCRIPTOR_FILE_NAME);
+    if (await statFile(descriptorUri) !== undefined) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 async function createConfiguration(context: vscode.ExtensionContext): Promise<boolean> {

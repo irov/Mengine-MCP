@@ -6,6 +6,14 @@ import { errorResult, successResult } from "./errors.js";
 import { LaunchMode, SessionManager } from "./session.js";
 import { MENGINE_MCP_VERSION } from "./version.js";
 
+export type MengineMcpStatus = {
+  configured: boolean;
+  cwd: string;
+  descriptorPath: string | null;
+  discovery: "argument" | "environment" | "workspace" | "missing";
+  apps: Array<{ id: string; profiles: string[] }>;
+};
+
 const AppIdSchema = z.object({ appId: z.string().min(1) });
 const TimeoutSchema = z.number().int().positive().max(300_000).default(10_000);
 const MouseStepSchema = z.object({
@@ -266,11 +274,8 @@ const runtimeTools: RuntimeToolDefinition[] = [
   },
 ];
 
-export function createMengineMcpServer(manager: SessionManager): McpServer {
-  const server = new McpServer(
-    { name: "mengine-mcp", version: MENGINE_MCP_VERSION },
-    { instructions: "Launch an application before using runtime tools. Use hidden_render when screenshots are needed and headless_logic for logic-only checks. Builds are outside this MCP server." },
-  );
+export function createMengineMcpServer(manager: SessionManager, status: MengineMcpStatus): McpServer {
+  const server = createBaseServer(status, true);
 
   server.registerTool("app_list", {
     title: "List Mengine applications",
@@ -408,6 +413,45 @@ export function createMengineMcpServer(manager: SessionManager): McpServer {
   }
 
   return server;
+}
+
+export function createUnconfiguredMengineMcpServer(status: MengineMcpStatus): McpServer {
+  return createBaseServer(status, false);
+}
+
+function createBaseServer(status: MengineMcpStatus, configured: boolean): McpServer {
+  const server = new McpServer(
+    { name: "mengine-mcp", version: MENGINE_MCP_VERSION },
+    {
+      instructions: configured
+        ? "Call app_list before runtime work, then launch an existing artifact with app_launch. Use hidden_render for screenshots and headless_logic for logic-only checks. Builds are outside this MCP server."
+        : "No mengine.mcp.json was found from this Codex working directory. Only mengine_status is available; open a configured Mengine project and start a new agent.",
+    },
+  );
+
+  server.registerTool("mengine_status", {
+    title: "Read Mengine MCP workspace status",
+    description: "Return the current Codex working directory, descriptor discovery result, server version, and configured application profiles.",
+    inputSchema: z.object({}),
+    annotations: { readOnlyHint: true },
+  }, async () => successResult({ version: MENGINE_MCP_VERSION, ...status }));
+
+  return server;
+}
+
+export function makeMengineMcpStatus(
+  cwd: string,
+  descriptorPath: string | undefined,
+  discovery: MengineMcpStatus["discovery"],
+  apps: MengineMcpStatus["apps"] = [],
+): MengineMcpStatus {
+  return {
+    configured: descriptorPath !== undefined,
+    cwd,
+    descriptorPath: descriptorPath ?? null,
+    discovery,
+    apps,
+  };
 }
 
 async function invoke(callback: () => unknown | Promise<unknown>): Promise<ReturnType<typeof successResult> | ReturnType<typeof errorResult>> {

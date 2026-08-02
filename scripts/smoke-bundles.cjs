@@ -25,6 +25,7 @@ assert.match(serverResult.stderr, /^mengine-mcp:/u);
 const registeredProviders = [];
 const registeredCommands = [];
 const disposable = { dispose() {} };
+const output = { appendLine() {}, dispose() {}, show() {} };
 
 class MockEventEmitter {
   event() {}
@@ -40,9 +41,15 @@ const vscode = {
     },
   },
   commands: {
+    executeCommand() {},
     registerCommand(command) {
       registeredCommands.push(command);
       return disposable;
+    },
+  },
+  extensions: {
+    getExtension() {
+      return undefined;
     },
   },
   lm: {
@@ -52,10 +59,25 @@ const vscode = {
     },
   },
   workspace: {
+    isTrusted: true,
     workspaceFolders: [],
+    getConfiguration() {
+      return { get() { return undefined; } };
+    },
+    onDidGrantWorkspaceTrust() {
+      return disposable;
+    },
     onDidChangeWorkspaceFolders() {
       return disposable;
     },
+  },
+  window: {
+    createOutputChannel() {
+      return output;
+    },
+    async showErrorMessage() {},
+    async showInformationMessage() {},
+    async showWarningMessage() {},
   },
 };
 
@@ -77,10 +99,16 @@ try {
     },
     extension: {
       packageJSON: {
-        version: "0.1.0",
+        version: "0.2.0",
       },
     },
     extensionUri: {},
+    globalState: {
+      get() {
+        return undefined;
+      },
+      async update() {},
+    },
     subscriptions,
   });
 
@@ -88,6 +116,9 @@ try {
   assert.deepEqual(registeredCommands, [
     "mengineMcp.createConfiguration",
     "mengineMcp.openConfiguration",
+    "mengineMcp.connectCodex",
+    "mengineMcp.disconnectCodex",
+    "mengineMcp.showCodexStatus",
   ]);
   assert.equal(typeof registeredProviders[0].provider.provideMcpServerDefinitions, "function");
 } finally {

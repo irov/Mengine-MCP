@@ -2,7 +2,7 @@
   "name": "mengine-mcp",
   "displayName": "Mengine MCP",
   "description": "Control and debug Mengine games with AI agents: launch builds, inspect scenes, inject input, capture frames, hot-reload assets, and debug Python.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "publisher": "wonderland",
@@ -62,7 +62,10 @@
   "activationEvents": [
     "onStartupFinished",
     "onCommand:mengineMcp.createConfiguration",
-    "onCommand:mengineMcp.openConfiguration"
+    "onCommand:mengineMcp.openConfiguration",
+    "onCommand:mengineMcp.connectCodex",
+    "onCommand:mengineMcp.disconnectCodex",
+    "onCommand:mengineMcp.showCodexStatus"
   ],
   "contributes": {
     "mcpServerDefinitionProviders": [
@@ -80,6 +83,21 @@
       {
         "command": "mengineMcp.openConfiguration",
         "title": "Open Configuration",
+        "category": "Mengine MCP"
+      },
+      {
+        "command": "mengineMcp.connectCodex",
+        "title": "Connect Codex",
+        "category": "Mengine MCP"
+      },
+      {
+        "command": "mengineMcp.disconnectCodex",
+        "title": "Disconnect Codex",
+        "category": "Mengine MCP"
+      },
+      {
+        "command": "mengineMcp.showCodexStatus",
+        "title": "Show Codex Status",
         "category": "Mengine MCP"
       }
     ],

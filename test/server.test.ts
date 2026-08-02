@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createMengineMcpServer } from "../src/server.js";
+import {
+  createMengineMcpServer,
+  createUnconfiguredMengineMcpServer,
+  makeMengineMcpStatus,
+} from "../src/server.js";
 import type { SessionManager } from "../src/session.js";
 
 const EXPECTED_TOOLS = [
@@ -27,6 +31,7 @@ const EXPECTED_TOOLS = [
   "input_sequence",
   "input_touch",
   "logs_read",
+  "mengine_status",
   "resource_reload",
   "resource_revert",
   "runtime_control",
@@ -47,8 +52,15 @@ const EXPECTED_TOOLS = [
   "wait_for",
 ] as const;
 
+const configuredStatus = makeMengineMcpStatus(
+  "/workspace/game",
+  "/workspace/game/mengine.mcp.json",
+  "workspace",
+  [{ id: "game", profiles: ["macos-debug"] }],
+);
+
 test("MCP publishes the complete public tool set with object input schemas", () => {
-  const server = createMengineMcpServer({} as SessionManager);
+  const server = createMengineMcpServer({} as SessionManager, configuredStatus);
   const registered = server as unknown as { _registeredTools: Record<string, unknown> };
 
   assert.deepEqual(Object.keys(registered._registeredTools).sort(), [...EXPECTED_TOOLS].sort());
@@ -62,7 +74,7 @@ test("MCP publishes the complete public tool set with object input schemas", () 
 });
 
 test("high-risk tool schemas expose their required guards and enums", () => {
-  const server = createMengineMcpServer({} as SessionManager);
+  const server = createMengineMcpServer({} as SessionManager, configuredStatus);
   const launch = server.toolInputSchemaJson("app_launch") as { properties: Record<string, { enum?: string[] }> };
   const evaluate = server.toolInputSchemaJson("script_eval") as { properties: Record<string, { enum?: string[] }> };
   const exceptionPolicy = server.toolInputSchemaJson("debug_set_exception_policy") as { properties: Record<string, { enum?: string[] }> };
@@ -70,4 +82,18 @@ test("high-risk tool schemas expose their required guards and enums", () => {
   assert.deepEqual(launch.properties.mode?.enum, ["visible", "hidden_render", "headless_logic"]);
   assert.deepEqual(evaluate.properties.scope?.enum, ["module", "globals", "frame"]);
   assert.deepEqual(exceptionPolicy.properties.policy?.enum, ["none", "uncaught", "all"]);
+});
+
+test("unconfigured workspaces publish only the read-only status tool", () => {
+  const server = createUnconfiguredMengineMcpServer(makeMengineMcpStatus(
+    "/workspace/not-a-game",
+    undefined,
+    "missing",
+  ));
+  const registered = server as unknown as {
+    _registeredTools: Record<string, { annotations?: { readOnlyHint?: boolean } }>;
+  };
+
+  assert.deepEqual(Object.keys(registered._registeredTools), ["mengine_status"]);
+  assert.equal(registered._registeredTools.mengine_status?.annotations?.readOnlyHint, true);
 });

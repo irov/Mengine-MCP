@@ -3,4 +3,5 @@ dist/
 dist-test/
 release/
 *.vsix
+*.code-workspace
 .DS_Store

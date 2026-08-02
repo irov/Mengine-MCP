@@ -1,32 +1,51 @@
 #!/usr/bin/env node
 
-import path from "node:path";
 import process from "node:process";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 
 import { loadDescriptor } from "./descriptor.js";
-import { createMengineMcpServer } from "./server.js";
+import {
+  createMengineMcpServer,
+  createUnconfiguredMengineMcpServer,
+  makeMengineMcpStatus,
+} from "./server.js";
 import { SessionManager } from "./session.js";
+import { resolveDescriptor } from "./workspace.js";
 
-const configArgumentIndex = process.argv.indexOf("--config");
-const configPath = configArgumentIndex === -1
-  ? process.env.MENGINE_MCP_CONFIG ?? path.resolve("mengine.mcp.json")
-  : process.argv[configArgumentIndex + 1];
-
-if (configPath === undefined) {
-  console.error("mengine-mcp: --config requires a path");
-  process.exit(2);
-}
+let manager: SessionManager | undefined;
 
 try {
-  const descriptor = await loadDescriptor(configPath);
-  const manager = new SessionManager(descriptor);
-  const handle = serveStdio(() => createMengineMcpServer(manager), {
+  const resolution = resolveDescriptor();
+  let createServer;
+
+  if (resolution.filePath === undefined) {
+    const status = makeMengineMcpStatus(
+      resolution.searchedFrom,
+      undefined,
+      resolution.source,
+    );
+    createServer = () => createUnconfiguredMengineMcpServer(status);
+  } else {
+    const descriptor = await loadDescriptor(resolution.filePath);
+    manager = new SessionManager(descriptor);
+    const status = makeMengineMcpStatus(
+      resolution.searchedFrom,
+      descriptor.filePath,
+      resolution.source,
+      descriptor.value.apps.map(app => ({
+        id: app.id,
+        profiles: app.profiles.map(profile => profile.id),
+      })),
+    );
+    createServer = () => createMengineMcpServer(manager!, status);
+  }
+
+  const handle = serveStdio(createServer, {
     onerror: error => console.error(`mengine-mcp: ${error.message}`),
   });
 
   const shutdown = async (): Promise<void> => {
-    await manager.close();
+    await manager?.close();
     await handle.close();
   };
 

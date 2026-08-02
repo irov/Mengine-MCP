@@ -266,6 +266,11 @@ for (const mode of ["visible", "hidden_render", "headless_logic"] as const satis
         assert.ok((capture.binary?.length ?? 0) > 8);
         assert.deepEqual(capture.binary?.subarray(0, 8), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
       }
+
+      const stopped = await manager.stop(appId!, true, 10_000);
+      assert.equal(stopped.state, "stopped");
+      assert.equal(stopped.exitCode, 0);
+      assert.equal(stopped.signal, null);
     } finally {
       await manager.close();
     }

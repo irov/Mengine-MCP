@@ -25,7 +25,7 @@ Mengine MCP does not build the game. It launches artifacts produced by your norm
 Install **Mengine MCP** from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=wonderland.mengine-mcp), or install a locally built VSIX:
 
 ```sh
-code --install-extension mengine-mcp-0.1.0.vsix
+code --install-extension mengine-mcp-0.2.0.vsix
 ```
 
 The VSIX contains both the extension and the STDIO MCP server. Users do not need to install a separate Node.js runtime.
@@ -37,6 +37,8 @@ The VSIX contains both the extension and the STDIO MCP server. Users do not need
 3. Run `Mengine MCP: Create Configuration` from the Command Palette.
 4. Edit the generated `mengine.mcp.json` with the commands and paths for the game.
 5. Open Chat in agent mode. VS Code automatically discovers `Mengine MCP: <workspace>`.
+
+The extension never launches the game when a workspace opens. It only publishes MCP tools; the agent launches an existing Development artifact when a runtime, frame, input, scene, or log check is actually needed.
 
 The descriptor is resolved relative to the game root. A minimal desktop profile looks like this:
 
@@ -73,9 +75,23 @@ The descriptor is resolved relative to the game root. A minimal desktop profile 
 
 See [mengine.mcp.example.json](mengine.mcp.example.json) for desktop and Android profiles. Android launch profiles receive the listener endpoint and session token as Intent extras, and can use `portForwardCommand` for `adb reverse`.
 
+## Automatic Codex connection
+
+When an installed Mengine MCP extension opens a trusted workspace whose root contains `mengine.mcp.json`, it also maintains a global Codex MCP server named `mengine`. No terminal command, project-local server source, `.codex/config.toml`, or versioned VSIX path is required.
+
+The managed registration launches the server bundled in the currently installed extension through the VS Code runtime. After the first registration, start a new Codex agent or restart the Codex extension if the running agent does not refresh its MCP configuration. Later workspace opens and VSIX updates are reconciled automatically.
+
+An existing `mengine` registration without the `wonderland.mengine-mcp` management marker is preserved. Use these Command Palette recovery actions to inspect or explicitly change registration state:
+
+- `Mengine MCP: Show Codex Status`
+- `Mengine MCP: Connect Codex`
+- `Mengine MCP: Disconnect Codex`
+
+Automatic registration and recovery commands are disabled in untrusted workspaces. Failure to locate Codex does not affect the existing VS Code Chat MCP provider.
+
 ## Run the STDIO server directly
 
-The server also works with Codex and other MCP clients independently of VS Code:
+The server also works with other MCP clients independently of VS Code:
 
 ```sh
 npm ci
@@ -83,7 +99,9 @@ npm run build
 node dist/mengine-mcp.mjs --config /path/to/game/mengine.mcp.json
 ```
 
-It speaks standard MCP over STDIO and connects to the running game through the authenticated `MNCP v1` TCP protocol.
+Configuration discovery uses this order: explicit `--config`, `MENGINE_MCP_CONFIG`, then an upward search for `mengine.mcp.json` from the MCP process working directory. An explicitly missing `--config` remains an error. Without any discovered descriptor, the server starts normally and publishes only the read-only `mengine_status` tool, so its global Codex registration does not expose game controls in unrelated projects.
+
+It speaks standard MCP over STDIO and connects to the running game through the authenticated `MNCP v1` TCP protocol. It can install or launch only commands declared in the descriptor; it never builds, signs, archives, deploys, or publishes an application.
 
 ## Development
 
