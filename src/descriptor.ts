@@ -40,6 +40,7 @@ const LaunchProfileSchema = z.object({
   environment: z.record(z.string(), z.string()).default({}),
   installCommand: CommandSchema.optional(),
   portForwardCommand: CommandSchema.optional(),
+  stopCommand: CommandSchema.optional(),
   logicHostProfile: z.string().optional(),
   connectionHost: z.string().default("127.0.0.1"),
   allowedRemoteHosts: z.array(z.string()).default([]),

@@ -56,6 +56,8 @@ export type SessionStatus = {
   capabilities: string[];
   exitCode?: number | null;
   signal?: NodeJS.Signals | null;
+  launcherExitCode?: number | null;
+  launcherSignal?: NodeJS.Signals | null;
 };
 
 export function validateHandshakePayload(payload: unknown, token: string): string[] {
@@ -82,7 +84,12 @@ type LaunchContext = {
 };
 
 const MOBILE_PLATFORMS = new Set(["android", "ios", "ios-simulator"]);
+const DESKTOP_PLATFORMS = new Set(["win32", "macos", "unix", "gdk"]);
 const MAX_CAPTURED_LOG_LINES = 5000;
+
+function findManagedMcpArgument(args: string[]): string | undefined {
+  return args.find(value => /^--?(?:mcp|nomcp)/iu.test(value));
+}
 
 export function makeLaunchArguments(
   profile: Pick<LaunchProfile, "args" | "platform">,
@@ -98,15 +105,54 @@ export function makeLaunchArguments(
       "--es", "mengine.mcp.token", variables.mcpToken!,
       "--es", "mengine.mcp.mode", variables.mcpMode!,
     );
-  } else if (!MOBILE_PLATFORMS.has(profile.platform)) {
+  } else {
+    const conflictingArgument = findManagedMcpArgument(args);
+    if (conflictingArgument !== undefined) {
+      throw new MengineRuntimeError(
+        "invalid_request",
+        `profile arguments must not override managed MCP option '${conflictingArgument}'`,
+      );
+    }
+
+    args.push(
+      "--mcp",
+      `--mcp-host:${variables.mcpHost!}`,
+      `--mcp-port:${variables.mcpPort!}`,
+      `--mcp-token:${variables.mcpToken!}`,
+      `--mcp-mode:${variables.mcpMode!}`,
+      "--cli",
+    );
+
+    if (!DESKTOP_PLATFORMS.has(profile.platform)) {
+      return args;
+    }
+
     if (mode === "hidden_render") {
-      args.push("--cli", "--windowhidden", "--nopause", "--noalreadyrunning");
+      args.push("--windowhidden", "--nopause", "--noalreadyrunning");
     } else if (mode === "headless_logic") {
-      args.push("--cli", "--norender", "--nopause", "--noalreadyrunning");
+      args.push("--norender", "--nopause", "--noalreadyrunning");
     }
   }
 
   return args;
+}
+
+export function makeLaunchEnvironment(
+  profile: Pick<LaunchProfile, "environment">,
+  variables: Record<string, string>,
+  baseEnvironment: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {
+    ...baseEnvironment,
+    ...Object.fromEntries(Object.entries(profile.environment).map(([key, value]) => [key, expandVariables(value, variables)])),
+  };
+
+  delete environment.MENGINE_MCP_HOST;
+  delete environment.MENGINE_MCP_PORT;
+  delete environment.MENGINE_MCP_TOKEN;
+  delete environment.MENGINE_MCP_MODE;
+
+  return environment;
 }
 
 export class MengineSession {
@@ -122,10 +168,14 @@ export class MengineSession {
   private state: SessionStatus["state"] = "launching";
   private exitCode: number | null | undefined;
   private exitSignal: NodeJS.Signals | null | undefined;
+  private launcherExitCode: number | null | undefined;
+  private launcherExitSignal: NodeJS.Signals | null | undefined;
   private readonly logs: string[] = [];
   private handshakeResolve: (() => void) | undefined;
   private handshakeReject: ((error: Error) => void) | undefined;
   private cleanupPromise: Promise<void> | undefined;
+  private launchVariables: Record<string, string> | undefined;
+  private launchEnvironment: NodeJS.ProcessEnv | undefined;
 
   public readonly token = randomBytes(32).toString("hex");
 
@@ -155,6 +205,7 @@ export class MengineSession {
     });
 
     const variables = this.makeVariables(port);
+    this.launchVariables = variables;
     if (this.context.effectiveProfile.portForwardCommand !== undefined) {
       await runCommand(this.expandCommand(this.context.effectiveProfile.portForwardCommand, variables), this.resolveCwd(), process.env);
     }
@@ -162,14 +213,9 @@ export class MengineSession {
     const profile = this.context.effectiveProfile;
     const args = makeLaunchArguments(profile, this.context.mode, variables);
     const command = expandVariables(profile.command, variables);
-    const environment: NodeJS.ProcessEnv = {
-      ...process.env,
-      ...Object.fromEntries(Object.entries(profile.environment).map(([key, value]) => [key, expandVariables(value, variables)])),
-      MENGINE_MCP_HOST: variables.mcpHost,
-      MENGINE_MCP_PORT: variables.mcpPort,
-      MENGINE_MCP_TOKEN: variables.mcpToken,
-      MENGINE_MCP_MODE: variables.mcpMode,
-    };
+    const environment = makeLaunchEnvironment(profile, variables);
+    this.launchEnvironment = environment;
+    const detachedLauncher = MOBILE_PLATFORMS.has(profile.platform);
 
     const child = spawn(command, args, {
       cwd: this.resolveCwd(),
@@ -184,6 +230,21 @@ export class MengineSession {
     child.stderr.on("data", value => this.captureLog("stderr", String(value)));
     child.once("error", error => this.fail(error));
     child.once("exit", (code, signal) => {
+      if (detachedLauncher) {
+        this.launcherExitCode = code;
+        this.launcherExitSignal = signal;
+        this.process = undefined;
+
+        if (code !== 0 || signal !== null) {
+          this.fail(new Error(`application launcher failed (code=${String(code)}, signal=${String(signal)})`));
+          void this.cleanup().catch(error => this.captureLog("mcp", `launch cleanup failed: ${error instanceof Error ? error.message : String(error)}`));
+        } else {
+          this.captureLog("mcp", "application launcher exited successfully; waiting for the detached runtime");
+        }
+
+        return;
+      }
+
       this.exitCode = code;
       this.exitSignal = signal;
       this.state = this.handshakeCompleted ? "stopped" : "failed";
@@ -198,7 +259,7 @@ export class MengineSession {
     await new Promise<void>((resolve, reject) => {
       this.handshakeResolve = resolve;
       this.handshakeReject = reject;
-      const timeout = setTimeout(() => reject(new MengineRuntimeError("timeout", "timed out waiting for MCPPlugin handshake")), profile.connectTimeoutMs);
+      const timeout = setTimeout(() => this.fail(new MengineRuntimeError("timeout", "timed out waiting for MCPPlugin handshake")), profile.connectTimeoutMs);
       const resolveWithCleanup = (): void => {
         clearTimeout(timeout);
         resolve();
@@ -226,6 +287,8 @@ export class MengineSession {
       capabilities: [...this.capabilities],
       ...(this.exitCode === undefined ? {} : { exitCode: this.exitCode }),
       ...(this.exitSignal === undefined ? {} : { signal: this.exitSignal }),
+      ...(this.launcherExitCode === undefined ? {} : { launcherExitCode: this.launcherExitCode }),
+      ...(this.launcherExitSignal === undefined ? {} : { launcherSignal: this.launcherExitSignal }),
     };
   }
 
@@ -270,6 +333,8 @@ export class MengineSession {
   }
 
   public async stop(force = false, gracefulTimeoutMs = 5_000): Promise<SessionStatus> {
+    const detachedLauncher = MOBILE_PLATFORMS.has(this.context.effectiveProfile.platform);
+
     if (this.authenticated) {
       try {
         await this.request("app_stop", {}, Math.min(gracefulTimeoutMs, 2_000));
@@ -289,6 +354,15 @@ export class MengineSession {
     if (force && this.process !== undefined && this.process.exitCode === null) {
       this.process.kill("SIGKILL");
       await waitForExit(this.process, 2_000);
+    }
+
+    if (detachedLauncher && this.authenticated && this.socket !== undefined && !this.socket.destroyed) {
+      await waitForSocketClose(this.socket, gracefulTimeoutMs);
+    }
+
+    if (detachedLauncher && this.state !== "stopped" && this.context.effectiveProfile.stopCommand !== undefined) {
+      await this.runStopCommand_();
+      this.state = "stopped";
     }
 
     this.close();
@@ -342,6 +416,13 @@ export class MengineSession {
       this.socket = undefined;
       this.authenticated = false;
       this.rejectPending(new MengineRuntimeError("disconnected", "runtime socket disconnected"));
+
+      if (MOBILE_PLATFORMS.has(this.context.effectiveProfile.platform) && this.handshakeCompleted && this.state !== "failed") {
+        this.state = "stopped";
+        this.server?.close();
+        this.server = undefined;
+        void this.cleanup().catch(error => this.captureLog("mcp", `launch cleanup failed: ${error instanceof Error ? error.message : String(error)}`));
+      }
     });
   }
 
@@ -509,6 +590,24 @@ export class MengineSession {
 
   private expandCommand(command: string[], variables: Record<string, string>): string[] {
     return command.map(value => expandVariables(value, variables));
+  }
+
+  private async runStopCommand_(): Promise<void> {
+    const stopCommand = this.context.effectiveProfile.stopCommand;
+    const variables = this.launchVariables;
+
+    if (stopCommand === undefined || variables === undefined) {
+      return;
+    }
+
+    const result = await runCommand(
+      this.expandCommand(stopCommand, variables),
+      this.resolveCwd(),
+      this.launchEnvironment ?? makeLaunchEnvironment(this.context.effectiveProfile, variables),
+    );
+
+    this.captureLog("stop", result.stdout);
+    this.captureLog("stop", result.stderr);
   }
 }
 
@@ -763,6 +862,17 @@ async function waitForExit(child: ChildProcessWithoutNullStreams, timeoutMs: num
 
   await Promise.race([
     new Promise<void>(resolve => child.once("exit", () => resolve())),
+    new Promise<void>(resolve => setTimeout(resolve, timeoutMs)),
+  ]);
+}
+
+async function waitForSocketClose(socket: Socket, timeoutMs: number): Promise<void> {
+  if (socket.destroyed) {
+    return;
+  }
+
+  await Promise.race([
+    new Promise<void>(resolve => socket.once("close", () => resolve())),
     new Promise<void>(resolve => setTimeout(resolve, timeoutMs)),
   ]);
 }

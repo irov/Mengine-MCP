@@ -12,7 +12,7 @@ import {
 
 const executable = "/Applications/Visual Studio Code.app/Code Helper";
 const serverPath = "/extensions/mengine-mcp/dist/mengine-mcp.mjs";
-const version = "0.3.2";
+const version = "0.3.3";
 
 function configuration(overrides: {
   command?: string;

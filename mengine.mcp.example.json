@@ -27,6 +27,7 @@
             "org.example.game/.MengineActivity"
           ],
           "portForwardCommand": ["adb", "reverse", "tcp:{mcpPort}", "tcp:{mcpPort}"],
+          "stopCommand": ["adb", "shell", "am", "force-stop", "org.example.game"],
           "logicHostProfile": "macos-dev"
         }
       ],

@@ -18,6 +18,7 @@ import {
   MENGINE_GITIGNORE_FILE_NAME,
   OPEN_CONFIGURATION_COMMAND,
   SHOW_CODEX_STATUS_COMMAND,
+  canManageGlobalCodexRegistration,
   makeServerLabel,
   makeServerVersion,
   mergeMengineGitignore,
@@ -182,7 +183,7 @@ async function reconcileCodexRegistration(
   registration: MengineCodexRegistrationManager,
   output: vscode.OutputChannel,
 ): Promise<void> {
-  if (!vscode.workspace.isTrusted || !await hasConfiguredWorkspace()) {
+  if (!canManageGlobalCodexRegistration(vscode.workspace.isTrusted)) {
     return;
   }
 
@@ -221,12 +222,8 @@ async function reconcileCodexRegistration(
 }
 
 async function connectCodexInteractively(registration: MengineCodexRegistrationManager): Promise<void> {
-  if (!vscode.workspace.isTrusted) {
+  if (!canManageGlobalCodexRegistration(vscode.workspace.isTrusted)) {
     void vscode.window.showErrorMessage("Trust this workspace before connecting Mengine MCP to Codex.");
-    return;
-  }
-  if (!await hasConfiguredWorkspace()) {
-    void vscode.window.showErrorMessage(`Open a workspace containing ${DESCRIPTOR_RELATIVE_PATH} before connecting Codex.`);
     return;
   }
 
@@ -277,17 +274,6 @@ async function showCodexStatus(
     output.show(true);
     void vscode.window.showErrorMessage(`Could not read Mengine MCP Codex status: ${formatError(error)}`);
   }
-}
-
-async function hasConfiguredWorkspace(): Promise<boolean> {
-  for (const workspaceFolder of vscode.workspace.workspaceFolders ?? []) {
-    const descriptorUri = makeDescriptorUri(workspaceFolder);
-    if (await statFile(descriptorUri) !== undefined) {
-      return true;
-    }
-  }
-
-  return false;
 }
 
 async function createConfiguration(context: vscode.ExtensionContext): Promise<boolean> {

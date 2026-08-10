@@ -162,6 +162,10 @@
         "portForwardCommand": {
           "$ref": "#/$defs/command"
         },
+        "stopCommand": {
+          "$ref": "#/$defs/command",
+          "description": "Fallback command used to terminate a detached mobile runtime when orderly MCP shutdown is unavailable or times out."
+        },
         "logicHostProfile": {
           "type": "string",
           "description": "Desktop profile used for mobile headless-logic launches."

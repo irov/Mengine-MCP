@@ -6,6 +6,8 @@ import { errorResult, successResult } from "./errors.js";
 import { LaunchMode, SessionManager } from "./session.js";
 import { MENGINE_MCP_VERSION } from "./version.js";
 
+export const CONFIGURED_SERVER_INSTRUCTIONS = "Before direct runtime, GUI, Xcode, Simulator, or OS screenshot actions, call mengine_status and app_list and prefer Mengine MCP. Build managed profiles with app_build. Default app_launch to hidden_render. frame_capture renders offscreen; no game or Simulator window must be open or focused. Use visible only if the user explicitly asks. Fall back only when MCP is unavailable or reports the operation unsupported, and state that fallback. Always call app_stop.";
+
 export type MengineMcpStatus = {
   configured: boolean;
   cwd: string;
@@ -307,28 +309,28 @@ export function createMengineMcpServer(manager: SessionManager, status: MengineM
 
   server.registerTool("app_launch", {
     title: "Launch Mengine application",
-    description: "Launch an existing application artifact and wait for authenticated MCPPlugin connection.",
-    inputSchema: z.object({ appId: z.string().min(1), profileId: z.string().min(1), mode: z.enum(["visible", "hidden_render", "headless_logic"]).default("visible") }),
+    description: "Launch an existing application through silent CLI automation and wait for authenticated MCPPlugin connection. Defaults to hidden rendering; visible mode is an explicit interactive escape hatch.",
+    inputSchema: z.object({ appId: z.string().min(1), profileId: z.string().min(1), mode: z.enum(["visible", "hidden_render", "headless_logic"]).default("hidden_render") }),
     annotations: { destructiveHint: true, idempotentHint: false },
   }, async ({ appId, profileId, mode }) => invoke(() => manager.launch(appId, profileId, mode as LaunchMode)));
 
   server.registerTool("app_status", {
     title: "Read Mengine application status",
-    description: "Return process, connection, requested/effective platform, launch mode, and runtime capabilities.",
+    description: "Return owned process or detached launcher state, connection, requested/effective platform, launch mode, and runtime capabilities.",
     inputSchema: AppIdSchema,
     annotations: { readOnlyHint: true },
   }, async ({ appId }) => invoke(() => manager.status(appId)));
 
   server.registerTool("app_stop", {
     title: "Stop Mengine application",
-    description: "Request orderly shutdown and optionally force-kill only the process owned by this MCP session.",
+    description: "Request orderly runtime shutdown, then use the configured detached stop command or force-kill only the process owned by this MCP session when needed.",
     inputSchema: AppIdSchema.extend({ force: z.boolean().default(false), gracefulTimeoutMs: z.number().int().positive().max(60_000).default(5_000) }),
     annotations: { destructiveHint: true, idempotentHint: true },
   }, async ({ appId, force, gracefulTimeoutMs }) => invoke(() => manager.stop(appId, force, gracefulTimeoutMs)));
 
   server.registerTool("frame_capture", {
     title: "Capture Mengine frame",
-    description: "Capture a PNG from visible or hidden-render mode. Headless logic mode returns unsupported.",
+    description: "Capture a PNG from an offscreen render target in visible or hidden-render mode. The game or Simulator window does not need to be open, visible, or focused. Headless logic mode returns unsupported.",
     inputSchema: AppIdSchema.extend({ includeAlpha: z.boolean().default(false), timeoutMs: TimeoutSchema }),
     annotations: { readOnlyHint: true },
   }, async ({ appId, includeAlpha, timeoutMs }) => {
@@ -438,7 +440,7 @@ function createBaseServer(status: MengineMcpStatus, configured: boolean): McpSer
     { name: "mengine-mcp", version: MENGINE_MCP_VERSION },
     {
       instructions: configured
-        ? "Call app_list before runtime work. Managed profiles use app_build before app_launch; command profiles launch existing artifacts directly. Use hidden_render for screenshots and headless_logic for logic-only checks."
+        ? CONFIGURED_SERVER_INSTRUCTIONS
         : "No .mengine/mcp.json was found from this Codex working directory. Only mengine_status is available; open a configured Mengine project and start a new agent.",
     },
   );

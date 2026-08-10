@@ -26,7 +26,7 @@ Mengine MCP can incrementally build managed macOS Development profiles. Other pl
 Install **Mengine MCP** from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=wonderland.mengine-mcp), or install a locally built VSIX:
 
 ```sh
-code --install-extension mengine-mcp-0.3.2.vsix
+code --install-extension mengine-mcp-0.3.3.vsix
 ```
 
 The VSIX contains both the extension and the STDIO MCP server. Users do not need to install a separate Node.js runtime.
@@ -99,13 +99,15 @@ The extension creates `.mengine/.gitignore` with rules for `local.json` and `.ca
 
 Use `app_build` for an incremental build and then `app_launch`. Rebuilding overwrites the same profile cache; Mengine MCP does not retain generations or copies of previous artifacts. A failed rebuild marks the current state as `failed` while retaining the previous build metadata in `lastSuccessful`; because the output directory is shared, this is a record rather than an artifact rollback guarantee. For macOS launch, Mengine MCP creates one ad-hoc-signed copy in the local system temporary directory so builds stored on SMB volumes can run despite server-managed extended attributes; it removes that copy on stop, exit, failed launch, rebuild, or clean. `app_clean` removes only the selected profile directory and any temporary launch copy. Managed builds currently support macOS; the profile-scoped layout reserves separate directories for iOS, iOS Simulator, and Android providers.
 
-See [mengine.mcp.example.json](mengine.mcp.example.json) for desktop and Android profiles. Android launch profiles receive the listener endpoint and session token as Intent extras, and can use `portForwardCommand` for `adb reverse`.
+See [mengine.mcp.example.json](mengine.mcp.example.json) for desktop and Android profiles. Android launch profiles receive the listener endpoint and session token as Intent extras, and can use `portForwardCommand` for `adb reverse`. Detached Android, iOS, and iOS Simulator launchers may also define a `stopCommand` fallback. `app_stop` first requests orderly shutdown over MNCP and uses that command only when the runtime is disconnected or does not stop before the timeout.
 
-For `hidden_render` and `headless_logic`, Mengine MCP passes the existing `--cli` argument to desktop runtimes. Desktop Mengine hosts translate that argument into `Configuration::silentDialog` before calling `API_MengineCreate`; Kernel code and `MCPPlugin` do not infer dialog policy from MCP endpoint credentials. Visible launches remain interactive.
+Command-line profiles receive `--mcp`, the authenticated `--mcp-host`, `--mcp-port`, `--mcp-token`, and `--mcp-mode` options, plus `--cli`. Mengine treats `--cli` as silent automation: desktop hosts suppress modal startup dialogs and the Bootstrapper selects `SilentSoundSystem`, so even an explicitly visible MCP launch has no game audio. `app_launch` defaults to `hidden_render`; `visible` remains an explicit interactive escape hatch. Android keeps its Intent-extra transport.
+
+`frame_capture` renders into an engine-owned offscreen target and encodes that target as PNG. It does not use an OS screenshot and does not require the game, Xcode, or Simulator window to be open, visible, focused, or frontmost. Only `headless_logic`, which has no renderer, cannot capture frames.
 
 ## Automatic Codex connection
 
-When an installed Mengine MCP extension opens a trusted workspace containing `.mengine/mcp.json`, it also maintains a global Codex MCP server named `mengine`. No terminal command, project-local server source, `.codex/config.toml`, or versioned VSIX path is required.
+Whenever the installed extension activates in a trusted workspace, it also maintains a global Codex MCP server named `mengine`. Reconciliation does not require the current workspace to contain `.mengine/mcp.json`; an unconfigured server safely exposes only `mengine_status`. No terminal command, project-local server source, `.codex/config.toml`, or versioned VSIX path is required.
 
 The managed registration launches the server bundled in the currently installed extension through the VS Code runtime. After the first registration, start a new Codex agent or restart the Codex extension if the running agent does not refresh its MCP configuration. Later workspace opens and VSIX updates are reconciled automatically.
 
@@ -116,6 +118,26 @@ An existing `mengine` registration without the `wonderland.mengine-mcp` manageme
 - `Mengine MCP: Disconnect Codex`
 
 Automatic registration and recovery commands are disabled in untrusted workspaces. Failure to locate Codex does not affect the existing VS Code Chat MCP provider.
+
+## Guide Codex to prefer Mengine MCP
+
+The MCP server publishes an MCP-first workflow in its server-wide instructions. The critical guidance is self-contained within the first 512 characters, following the [official OpenAI MCP guidance](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
+
+For a fallback that still applies when the MCP server failed to load, merge the following block into the game's root `AGENTS.md`:
+
+```md
+## Mengine runtime workflow
+
+- Before direct runtime, GUI, Xcode, Simulator, or OS screenshot actions, call `mengine_status` and `app_list` and prefer Mengine MCP.
+- Build managed profiles with `app_build`; launch with the default `hidden_render` mode and capture with `frame_capture`.
+- `frame_capture` renders offscreen. The game or Simulator window does not need to be open, visible, focused, or frontmost.
+- Use `visible` only when the user explicitly requests interactive foreground behavior.
+- Fall back to direct tools only when MCP is unavailable or reports the operation unsupported, and state that fallback explicitly.
+- If `mengine_status` is absent, report that Codex registration or a fresh Codex session is required; do not silently open Xcode, Simulator, or the game GUI.
+- Always call `app_stop` after runtime work.
+```
+
+Codex discovers `AGENTS.md` from the project root down to the current working directory, so this file belongs at the game root rather than under `.mengine`; see the [official OpenAI `AGENTS.md` guide](https://learn.chatgpt.com/docs/agent-configuration/agents-md). The extension never creates or overwrites this project instruction file. After a registration or VSIX update, start a new Codex agent because active sessions retain their original tool inventory.
 
 ## Run the STDIO server directly
 

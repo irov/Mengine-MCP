@@ -13,6 +13,7 @@ import {
   MENGINE_GITIGNORE_FILE_NAME,
   OPEN_CONFIGURATION_COMMAND,
   SHOW_CODEX_STATUS_COMMAND,
+  canManageGlobalCodexRegistration,
   makeServerLabel,
   makeServerVersion,
   mergeMengineGitignore,
@@ -31,6 +32,8 @@ test("VS Code provider uses stable descriptor and server identities", () => {
   assert.equal(SHOW_CODEX_STATUS_COMMAND, "mengineMcp.showCodexStatus");
   assert.equal(makeServerLabel("My Game"), "Mengine MCP: My Game");
   assert.equal(makeServerVersion("0.1.0", 1234), "0.1.0:1234");
+  assert.equal(canManageGlobalCodexRegistration(true), true);
+  assert.equal(canManageGlobalCodexRegistration(false), false);
 });
 
 test("Mengine configuration ignores local settings and managed build cache", () => {

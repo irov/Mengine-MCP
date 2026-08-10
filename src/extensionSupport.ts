@@ -17,6 +17,10 @@ export function makeServerVersion(extensionVersion: string, descriptorModifiedAt
   return `${extensionVersion}:${descriptorModifiedAt}`;
 }
 
+export function canManageGlobalCodexRegistration(isTrusted: boolean): boolean {
+  return isTrusted;
+}
+
 export function mergeMengineGitignore(source: string): string {
   const required = [".cache/", "local.json"];
   const lines = source.split(/\r?\n/u);

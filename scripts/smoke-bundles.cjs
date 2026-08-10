@@ -59,7 +59,7 @@ const vscode = {
     },
   },
   workspace: {
-    isTrusted: true,
+    isTrusted: false,
     workspaceFolders: [],
     getConfiguration() {
       return { get() { return undefined; } };
@@ -99,7 +99,7 @@ try {
     },
     extension: {
       packageJSON: {
-        version: "0.3.2",
+        version: "0.3.3",
       },
     },
     extensionUri: {},

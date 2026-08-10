@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   createMengineMcpServer,
   createUnconfiguredMengineMcpServer,
+  CONFIGURED_SERVER_INSTRUCTIONS,
   makeMengineMcpStatus,
 } from "../src/server.js";
 import type { SessionManager } from "../src/session.js";
@@ -75,15 +76,29 @@ test("MCP publishes the complete public tool set with object input schemas", () 
   }
 });
 
-test("high-risk tool schemas expose their required guards and enums", () => {
+test("high-risk tool schemas expose their required guards, defaults, and enums", () => {
   const server = createMengineMcpServer({} as SessionManager, configuredStatus);
-  const launch = server.toolInputSchemaJson("app_launch") as { properties: Record<string, { enum?: string[] }> };
+  const launch = server.toolInputSchemaJson("app_launch") as { properties: Record<string, { default?: string; enum?: string[] }> };
   const evaluate = server.toolInputSchemaJson("script_eval") as { properties: Record<string, { enum?: string[] }> };
   const exceptionPolicy = server.toolInputSchemaJson("debug_set_exception_policy") as { properties: Record<string, { enum?: string[] }> };
 
   assert.deepEqual(launch.properties.mode?.enum, ["visible", "hidden_render", "headless_logic"]);
+  assert.equal(launch.properties.mode?.default, "hidden_render");
   assert.deepEqual(evaluate.properties.scope?.enum, ["module", "globals", "frame"]);
   assert.deepEqual(exceptionPolicy.properties.policy?.enum, ["none", "uncaught", "all"]);
+});
+
+test("configured guidance is MCP-first, offscreen-aware, and self-contained", () => {
+  assert.ok(CONFIGURED_SERVER_INSTRUCTIONS.length <= 512);
+  assert.match(CONFIGURED_SERVER_INSTRUCTIONS, /prefer Mengine MCP/u);
+  assert.match(CONFIGURED_SERVER_INSTRUCTIONS, /frame_capture renders offscreen/u);
+  assert.match(CONFIGURED_SERVER_INSTRUCTIONS, /Use visible only if the user explicitly asks/u);
+
+  const server = createMengineMcpServer({} as SessionManager, configuredStatus);
+  const registered = server as unknown as {
+    _registeredTools: Record<string, { description?: string }>;
+  };
+  assert.match(registered._registeredTools.frame_capture?.description ?? "", /does not need to be open, visible, or focused/u);
 });
 
 test("unconfigured workspaces publish only the read-only status tool", () => {

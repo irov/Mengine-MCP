@@ -2,10 +2,16 @@
 
 ## Unreleased
 
+## 0.3.3
+
 - Add profile-scoped managed macOS builds under `.mengine/.cache/build/<profileId>` with explicit `app_build` and `app_clean` tools.
 - Allow launch profiles to use a managed build instead of a committed executable path.
 - Create `.mengine/.gitignore` rules for the disposable build cache and machine-local `local.json`.
 - Stage an ephemeral ad-hoc-signed macOS launch copy outside SMB volumes and remove it with the session lifecycle.
+- Prefer silent hidden-render launches and offscreen frame capture in the MCP guidance exposed to Codex.
+- Pass authenticated MCP endpoint options and `--cli` directly to command-line runtimes; stop using legacy runtime endpoint environment variables.
+- Keep Android, iOS, and iOS Simulator sessions alive after their launcher command exits, with optional `stopCommand` cleanup.
+- Reconcile the managed global Codex registration from every trusted workspace so installed VSIX updates cannot leave a deleted bundle path behind.
 
 ## 0.3.2
 
