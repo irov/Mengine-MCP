@@ -86,3 +86,66 @@ test("descriptor rejects profiles without a command or managed build", async () 
 
   await assert.rejects(loadDescriptor(filePath), /requires either 'command' or 'build'/u);
 });
+
+test("descriptor expands machine-local variables from .mengine/local.json", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "mengine-mcp-local-"));
+  const directory = path.join(root, ".mengine");
+  const filePath = path.join(directory, "mcp.json");
+  await mkdir(directory);
+  await writeFile(path.join(directory, "local.json"), JSON.stringify({
+    engineRoot: "/engine",
+    variables: {
+      iosDeviceId: "device-1",
+      xcodeProject: "/tools/MengineMCPUIAutomation.xcodeproj",
+    },
+  }));
+  await writeFile(filePath, JSON.stringify({
+    version: 1,
+    apps: [{
+      id: "game",
+      name: "Game",
+      profiles: [{
+        id: "ios-device",
+        platform: "ios",
+        command: "xcrun",
+        args: ["--device", "{iosDeviceId}", "--mcp-port:{mcpPort}"],
+        coreDeviceTunnel: { deviceId: "{iosDeviceId}" },
+        iosUiAutomation: {
+          deviceId: "{iosDeviceId}",
+          targetBundleId: "com.example.game",
+          runnerCommand: ["xcodebuild", "-project", "{xcodeProject}", "MENGINE_MCP_UI_HOST={iosUiHost}"],
+        },
+      }],
+    }],
+  }));
+
+  const descriptor = await loadDescriptor(filePath);
+  const profile = descriptor.value.apps[0]!.profiles[0]!;
+  assert.deepEqual(profile.args, ["--device", "device-1", "--mcp-port:{mcpPort}"]);
+  assert.deepEqual(profile.coreDeviceTunnel, { deviceId: "device-1" });
+  assert.equal(profile.iosUiAutomation?.provider, "xctest");
+  assert.equal(profile.iosUiAutomation?.deviceId, "device-1");
+  assert.equal(profile.iosUiAutomation?.runnerCommand.at(-1), "MENGINE_MCP_UI_HOST={iosUiHost}");
+});
+
+test("descriptor rejects unresolved machine-local variables", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "mengine-mcp-missing-local-"));
+  const directory = path.join(root, ".mengine");
+  const filePath = path.join(directory, "mcp.json");
+  await mkdir(directory);
+  await writeFile(filePath, JSON.stringify({
+    version: 1,
+    apps: [{
+      id: "game",
+      name: "Game",
+      profiles: [{
+        id: "ios-device",
+        platform: "ios",
+        command: "xcrun",
+        args: ["--device", "{iosDeviceId}"],
+      }],
+    }],
+  }));
+
+  await assert.rejects(loadDescriptor(filePath), /missing local variable '\{iosDeviceId\}'/u);
+});

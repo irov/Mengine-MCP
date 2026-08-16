@@ -1,0 +1,51 @@
+name: MengineMCPUIAutomation
+options:
+  createIntermediateGroups: true
+  deploymentTarget:
+    iOS: "17.0"
+settings:
+  base:
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "5.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+targets:
+  MengineMCPUIAutomationHost:
+    type: application
+    platform: iOS
+    sources:
+      - Host
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.wonderland.mengine.MCPUIAutomationHost
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Mengine MCP UI Host
+  MengineMCPUIAutomationTests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - Tests
+    dependencies:
+      - target: MengineMCPUIAutomationHost
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.wonderland.mengine.MCPUIAutomationTests
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  MengineMCPUIAutomation:
+    build:
+      targets:
+        MengineMCPUIAutomationHost: all
+        MengineMCPUIAutomationTests:
+          - test
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - name: MengineMCPUIAutomationTests
+          parallelizable: false
+          randomExecutionOrder: false
+      environmentVariables:
+        MENGINE_MCP_UI_HOST: "$(MENGINE_MCP_UI_HOST)"
+        MENGINE_MCP_UI_PORT: "$(MENGINE_MCP_UI_PORT)"
+        MENGINE_MCP_UI_TOKEN: "$(MENGINE_MCP_UI_TOKEN)"
+        MENGINE_MCP_UI_TARGET_BUNDLE_ID: "$(MENGINE_MCP_UI_TARGET_BUNDLE_ID)"

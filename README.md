@@ -14,6 +14,7 @@ Instead of reasoning from source alone, an agent can click UI, inject touch and 
 - Launch managed or existing desktop and mobile builds in visible, hidden-render, or headless-logic mode.
 - Inspect and edit the live scene using generation-safe node handles.
 - Inject deterministic mouse, keyboard, and multi-touch sequences without moving the system cursor.
+- Drive native UIKit controls and iOS system alerts on physical devices through a lightweight XCTest UI runner.
 - Capture frames, read logs and diagnostics, and wait for runtime conditions.
 - Inspect, evaluate, and mutate Python state, including paused debugger frames.
 - Explicitly hot-reload Python modules and resource overlays with rollback on failure.
@@ -26,7 +27,7 @@ Mengine MCP can incrementally build managed macOS Development profiles. Other pl
 Install **Mengine MCP** from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=wonderland.mengine-mcp), or install a locally built VSIX:
 
 ```sh
-code --install-extension mengine-mcp-0.3.3.vsix
+code --install-extension mengine-mcp-0.3.5.vsix
 ```
 
 The VSIX contains both the extension and the STDIO MCP server. Users do not need to install a separate Node.js runtime.
@@ -98,6 +99,63 @@ The extension creates `.mengine/.gitignore` with rules for `local.json` and `.ca
 ```
 
 Use `app_build` for an incremental build and then `app_launch`. Rebuilding overwrites the same profile cache; Mengine MCP does not retain generations or copies of previous artifacts. A failed rebuild marks the current state as `failed` while retaining the previous build metadata in `lastSuccessful`; because the output directory is shared, this is a record rather than an artifact rollback guarantee. For macOS launch, Mengine MCP creates one ad-hoc-signed copy in the local system temporary directory so builds stored on SMB volumes can run despite server-managed extended attributes; it removes that copy on stop, exit, failed launch, rebuild, or clean. `app_clean` removes only the selected profile directory and any temporary launch copy. Managed builds currently support macOS; the profile-scoped layout reserves separate directories for iOS, iOS Simulator, and Android providers.
+
+Machine-specific descriptor values such as a physical-device identifier or the Mac's LAN address belong in ignored `.mengine/local.json` under `variables`. Reference them as `{variableName}` from `.mengine/mcp.json`; unresolved local variables fail descriptor loading, while managed runtime placeholders such as `{mcpPort}` remain available at launch.
+
+Physical iOS profiles can use an automatic CoreDevice USB tunnel, so they do not depend on Wi-Fi addresses or Local Network permission:
+
+```json
+{
+  "id": "ios-device-debug",
+  "platform": "ios",
+  "command": "xcrun",
+  "args": [
+    "devicectl", "device", "process", "launch",
+    "--device", "{iosDeviceId}",
+    "--terminate-existing",
+    "com.example.game"
+  ],
+  "coreDeviceTunnel": {
+    "deviceId": "{iosDeviceId}"
+  }
+}
+```
+
+Mengine MCP opens an LLDB/CoreDevice keepalive for the session, discovers the transient Mac-side IPv6 address, and closes the tunnel after `app_stop`. Store only `iosDeviceId` in `.mengine/local.json`; the tunnel address must not be committed or cached because CoreDevice changes it between connections.
+
+Engine input commands cannot reach UIKit views placed above the game or system-owned permission dialogs. Add `iosUiAutomation` to an iOS profile when the agent must inspect accessibility state, tap native controls, or accept/dismiss alerts on a physical device:
+
+```json
+{
+  "iosUiAutomation": {
+    "provider": "xctest",
+    "deviceId": "{iosDeviceId}",
+    "targetBundleId": "com.example.game",
+    "runnerCommand": [
+      "xcodebuild",
+      "-project", "{iosUiRunnerProject}",
+      "-scheme", "MengineMCPUIAutomation",
+      "-configuration", "Debug",
+      "-destination", "id={iosDeviceId}",
+      "-derivedDataPath", "{iosUiDerivedData}",
+      "-allowProvisioningUpdates",
+      "-allowProvisioningDeviceRegistration",
+      "DEVELOPMENT_TEAM={appleDevelopmentTeam}",
+      "CODE_SIGN_STYLE=Automatic",
+      "COMPILER_INDEX_STORE_ENABLE=NO",
+      "MENGINE_MCP_UI_HOST={iosUiHost}",
+      "MENGINE_MCP_UI_PORT={iosUiPort}",
+      "MENGINE_MCP_UI_TOKEN={iosUiToken}",
+      "MENGINE_MCP_UI_TARGET_BUNDLE_ID={iosUiTargetBundleId}",
+      "test"
+    ],
+    "startupTimeoutMs": 300000,
+    "requestTimeoutMs": 60000
+  }
+}
+```
+
+The standalone runner project is included at `ios/MengineMCPUIAutomation`; it uses only Xcode, XCTest, and XCUIAutomation and is not linked into the game or submitted to the App Store. Store the device, signing team, absolute runner-project path, and a derived-data path in ignored `.mengine/local.json`. Call `ios_ui_start` before recording or launching the tested app so runner installation is not visible in the user flow. `ios_ui_snapshot`, `ios_ui_screenshot`, `ios_ui_tap`, `ios_ui_tap_element`, `ios_ui_press_button`, and `ios_ui_alert` can then reach native and system-owned UI. Always finish with `ios_ui_stop`.
 
 See [mengine.mcp.example.json](mengine.mcp.example.json) for desktop and Android profiles. Android launch profiles receive the listener endpoint and session token as Intent extras, and can use `portForwardCommand` for `adb reverse`. Detached Android, iOS, and iOS Simulator launchers may also define a `stopCommand` fallback. `app_stop` first requests orderly shutdown over MNCP and uses that command only when the runtime is disconnected or does not stop before the timeout.
 

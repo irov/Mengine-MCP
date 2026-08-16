@@ -2,7 +2,7 @@
   "name": "mengine-mcp",
   "displayName": "Mengine MCP",
   "description": "Control and debug Mengine games with AI agents: launch builds, inspect scenes, inject input, capture frames, hot-reload assets, and debug Python.",
-  "version": "0.3.3",
+  "version": "0.3.5",
   "private": true,
   "type": "module",
   "publisher": "wonderland",

@@ -6,6 +6,7 @@ import net, { Server, Socket } from "node:net";
 import path from "node:path";
 
 import { BuildManager } from "./build.js";
+import { findCoreDeviceTunnelHost, startCoreDeviceTunnel } from "./coreDevice.js";
 import {
   AppDescriptor,
   LaunchProfile,
@@ -16,6 +17,7 @@ import {
   resolveDescriptorPath,
 } from "./descriptor.js";
 import { MengineRuntimeError, MengineRuntimeErrorCode } from "./errors.js";
+import { IosUiAutomationSession } from "./iosUiAutomation.js";
 import {
   MncpBinaryAssembler,
   MncpDecoder,
@@ -613,6 +615,7 @@ export class MengineSession {
 
 export class SessionManager {
   private readonly sessions = new Map<string, MengineSession>();
+  private readonly iosUiSessions = new Map<string, IosUiAutomationSession>();
   private readonly builds: BuildManager;
 
   public constructor(private readonly descriptor: LoadedDescriptor) {
@@ -707,6 +710,78 @@ export class SessionManager {
     return runCommand(command, profile.cwd === undefined ? this.descriptor.rootDirectory : resolveDescriptorPath(this.descriptor, profile.cwd), process.env);
   }
 
+  public async startIosUiAutomation(appId: string, profileId: string): Promise<unknown> {
+    const app = findApp(this.descriptor, appId);
+    const profile = findProfile(app, profileId);
+    if (profile.iosUiAutomation === undefined) {
+      throw new MengineRuntimeError("unsupported", `profile '${profileId}' has no iosUiAutomation configuration`);
+    }
+
+    const existing = this.iosUiSessions.get(appId);
+    if (existing !== undefined && ["starting", "connected"].includes(existing.status().state)) {
+      return existing.status();
+    }
+    await existing?.stop().catch(() => undefined);
+
+    const session = new IosUiAutomationSession(this.descriptor, profile, profile.iosUiAutomation);
+    this.iosUiSessions.set(appId, session);
+    try {
+      return await session.start();
+    } catch (error) {
+      await session.stop().catch(() => undefined);
+      throw error;
+    }
+  }
+
+  public iosUiAutomationStatus(appId: string): unknown {
+    const session = this.iosUiSessions.get(appId);
+    if (session !== undefined) {
+      return session.status();
+    }
+
+    const app = findApp(this.descriptor, appId);
+    return {
+      state: "stopped",
+      configuredProfiles: app.profiles
+        .filter(profile => profile.iosUiAutomation !== undefined)
+        .map(profile => profile.id),
+      ownsServer: false,
+    };
+  }
+
+  public async stopIosUiAutomation(appId: string): Promise<unknown> {
+    const session = this.requireIosUiAutomation(appId);
+    try {
+      return await session.stop();
+    } finally {
+      this.iosUiSessions.delete(appId);
+    }
+  }
+
+  public iosUiSnapshot(appId: string): Promise<string> {
+    return this.requireIosUiAutomation(appId).snapshot();
+  }
+
+  public iosUiScreenshot(appId: string): Promise<Buffer> {
+    return this.requireIosUiAutomation(appId).screenshot();
+  }
+
+  public iosUiTap(appId: string, x: number, y: number, coordinateSpace: "points" | "normalized"): Promise<unknown> {
+    return this.requireIosUiAutomation(appId).tap(x, y, coordinateSpace);
+  }
+
+  public iosUiTapElement(appId: string, using: string, value: string, index: number): Promise<unknown> {
+    return this.requireIosUiAutomation(appId).tapElement(using, value, index);
+  }
+
+  public iosUiPressButton(appId: string, button: "home" | "volume_up" | "volume_down"): Promise<unknown> {
+    return this.requireIosUiAutomation(appId).pressButton(button);
+  }
+
+  public iosUiAlert(appId: string, action: "text" | "buttons" | "accept" | "dismiss", buttonLabel?: string): Promise<unknown> {
+    return this.requireIosUiAutomation(appId).alert(action, buttonLabel);
+  }
+
   public async stop(appId: string, force: boolean, gracefulTimeoutMs: number): Promise<SessionStatus> {
     const session = this.requireSession(appId);
     try {
@@ -741,17 +816,29 @@ export class SessionManager {
   }
 
   public async close(): Promise<void> {
-    await Promise.all([...this.sessions.values()].map(async session => {
-      await session.stop(true, 1_000).catch(() => session.close());
-      await session.cleanup().catch(() => undefined);
-    }));
+    await Promise.all([
+      ...[...this.sessions.values()].map(async session => {
+        await session.stop(true, 1_000).catch(() => session.close());
+        await session.cleanup().catch(() => undefined);
+      }),
+      ...[...this.iosUiSessions.values()].map(session => session.stop().catch(() => undefined)),
+    ]);
     this.sessions.clear();
+    this.iosUiSessions.clear();
   }
 
   private requireSession(appId: string): MengineSession {
     const session = this.sessions.get(appId);
     if (session === undefined) {
       throw new MengineRuntimeError("disconnected", `application '${appId}' has no MCP session`);
+    }
+    return session;
+  }
+
+  private requireIosUiAutomation(appId: string): IosUiAutomationSession {
+    const session = this.iosUiSessions.get(appId);
+    if (session === undefined || session.status().state !== "connected") {
+      throw new MengineRuntimeError("disconnected", `application '${appId}' has no active iOS UI automation session`);
     }
     return session;
   }
@@ -767,19 +854,42 @@ export class SessionManager {
     profile: LaunchProfile & { command: string };
     cleanup?: () => Promise<void>;
   }> {
+    let resolvedProfile: LaunchProfile & { command: string };
+    let managedCleanup: (() => Promise<void>) | undefined;
+
     if (profile.command !== undefined) {
+      resolvedProfile = {
+        ...profile,
+        command: resolveExecutableCommand(this.descriptor, profile.command),
+      };
+    } else {
+      const managed = await this.builds.resolveManagedLaunch(profile);
+      resolvedProfile = { ...profile, command: managed.command, cwd: managed.cwd };
+      managedCleanup = managed.cleanup;
+    }
+
+    if (profile.coreDeviceTunnel === undefined) {
       return {
-        profile: {
-          ...profile,
-          command: resolveExecutableCommand(this.descriptor, profile.command),
-        },
+        profile: resolvedProfile,
+        ...(managedCleanup === undefined ? {} : { cleanup: managedCleanup }),
       };
     }
 
-    const managed = await this.builds.resolveManagedLaunch(profile);
+    if (profile.platform !== "ios") {
+      throw new MengineRuntimeError("invalid_request", "coreDeviceTunnel is supported only for physical iOS profiles");
+    }
+
+    const tunnel = await startCoreDeviceTunnel(profile.coreDeviceTunnel.deviceId);
     return {
-      profile: { ...profile, command: managed.command, cwd: managed.cwd },
-      cleanup: managed.cleanup,
+      profile: {
+        ...resolvedProfile,
+        connectionHost: tunnel.host,
+        allowedRemoteHosts: [...new Set([...resolvedProfile.allowedRemoteHosts, tunnel.host])],
+      },
+      cleanup: async () => {
+        await tunnel.cleanup();
+        await managedCleanup?.();
+      },
     };
   }
 }

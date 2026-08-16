@@ -2,11 +2,11 @@ import { Buffer } from "node:buffer";
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 
-import { errorResult, successResult } from "./errors.js";
+import { errorResult, MengineRuntimeError, successResult } from "./errors.js";
 import { LaunchMode, SessionManager } from "./session.js";
 import { MENGINE_MCP_VERSION } from "./version.js";
 
-export const CONFIGURED_SERVER_INSTRUCTIONS = "Before direct runtime, GUI, Xcode, Simulator, or OS screenshot actions, call mengine_status and app_list and prefer Mengine MCP. Build managed profiles with app_build. Default app_launch to hidden_render. frame_capture renders offscreen; no game or Simulator window must be open or focused. Use visible only if the user explicitly asks. Fall back only when MCP is unavailable or reports the operation unsupported, and state that fallback. Always call app_stop.";
+export const CONFIGURED_SERVER_INSTRUCTIONS = "Before direct runtime, GUI, Xcode, Simulator, or OS screenshot actions, call mengine_status and app_list and prefer Mengine MCP. Build with app_build. Use ios_ui_* for native iOS UI and system alerts. Default app_launch to hidden_render; frame_capture is offscreen. Use visible only if explicitly asked. Fall back only when unsupported and state it. Always stop app and iOS UI sessions.";
 
 export type MengineMcpStatus = {
   configured: boolean;
@@ -30,6 +30,15 @@ const TouchStepSchema = z.object({
   type: z.literal("touch"),
   params: z.object({ action: z.enum(["start", "move", "end", "cancel"]), touches: z.array(z.object({ id: z.number().int().nonnegative(), x: z.number(), y: z.number(), pressure: z.number().min(0).max(1).default(1) })).min(1), coordinateSpace: z.enum(["pixels", "normalized"]).default("normalized") }),
 });
+const AccelerometerParamsSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+  z: z.number(),
+});
+const AccelerometerStepSchema = z.object({
+  type: z.literal("accelerometer"),
+  params: AccelerometerParamsSchema,
+});
 const WaitConditionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("frames"), frames: z.number().int().positive() }),
   z.object({ type: z.literal("debugger"), paused: z.boolean().default(true) }),
@@ -43,6 +52,7 @@ const InputSequenceStepSchema = z.union([
   MouseStepSchema,
   KeyboardStepSchema,
   TouchStepSchema,
+  AccelerometerStepSchema,
   z.object({ type: z.literal("delay"), milliseconds: z.number().int().nonnegative().max(300_000) }),
   z.object({ type: z.literal("frames"), frames: z.number().int().positive().max(10000) }),
   z.object({ type: z.literal("wait"), condition: WaitConditionSchema }),
@@ -83,6 +93,13 @@ const runtimeTools: RuntimeToolDefinition[] = [
     title: "Change Mengine node",
     description: "Set supported properties on a generation-scoped live scene node.",
     inputSchema: AppIdSchema.extend({ handle: z.string().min(3), properties: z.record(z.string(), z.unknown()) }),
+    readOnly: false,
+  },
+  {
+    name: "input_accelerometer",
+    title: "Inject virtual accelerometer input",
+    description: "Inject one accelerometer sample in g-force units through InputService.",
+    inputSchema: AppIdSchema.extend(AccelerometerParamsSchema.shape),
     readOnly: false,
   },
   {
@@ -328,6 +345,103 @@ export function createMengineMcpServer(manager: SessionManager, status: MengineM
     annotations: { destructiveHint: true, idempotentHint: true },
   }, async ({ appId, force, gracefulTimeoutMs }) => invoke(() => manager.stop(appId, force, gracefulTimeoutMs)));
 
+  server.registerTool("ios_ui_start", {
+    title: "Start native iOS UI automation",
+    description: "Build and start the profile's lightweight XCTest UI runner. This is required before ios_ui_* commands and installs only the configured test helper on the physical device.",
+    inputSchema: z.object({ appId: z.string().min(1), profileId: z.string().min(1) }),
+    annotations: { destructiveHint: true, idempotentHint: true },
+  }, async ({ appId, profileId }) => invoke(() => manager.startIosUiAutomation(appId, profileId)));
+
+  server.registerTool("ios_ui_status", {
+    title: "Read native iOS UI automation status",
+    description: "Return the XCTest bridge state and configured iOS profiles.",
+    inputSchema: AppIdSchema,
+    annotations: { readOnlyHint: true },
+  }, async ({ appId }) => invoke(() => manager.iosUiAutomationStatus(appId)));
+
+  server.registerTool("ios_ui_stop", {
+    title: "Stop native iOS UI automation",
+    description: "Stop the XCTest UI runner and close its authenticated CoreDevice bridge.",
+    inputSchema: AppIdSchema,
+    annotations: { destructiveHint: true, idempotentHint: true },
+  }, async ({ appId }) => invoke(() => manager.stopIosUiAutomation(appId)));
+
+  server.registerTool("ios_ui_snapshot", {
+    title: "Inspect native iOS UI",
+    description: "Read the current XCTest accessibility hierarchy, including native UIKit controls and system alerts.",
+    inputSchema: AppIdSchema.extend({ maxCharacters: z.number().int().positive().max(1_000_000).default(200_000) }),
+    annotations: { readOnlyHint: true },
+  }, async ({ appId, maxCharacters }) => invoke(async () => {
+    const source = await manager.iosUiSnapshot(appId);
+    return {
+      source: source.slice(0, maxCharacters),
+      truncated: source.length > maxCharacters,
+      totalCharacters: source.length,
+    };
+  }));
+
+  server.registerTool("ios_ui_screenshot", {
+    title: "Capture native iOS screen",
+    description: "Capture the physical iOS screen through XCTest, including native UIKit controls and system alerts.",
+    inputSchema: AppIdSchema,
+    annotations: { readOnlyHint: true },
+  }, async ({ appId }) => {
+    try {
+      const value = await manager.iosUiScreenshot(appId);
+      return {
+        content: [{ type: "image" as const, data: value.toString("base64"), mimeType: "image/png" }],
+      };
+    } catch (error) {
+      return errorResult(error);
+    }
+  });
+
+  server.registerTool("ios_ui_tap", {
+    title: "Tap native iOS screen coordinates",
+    description: "Send a real XCTest touch at screen points or normalized coordinates. Unlike input_touch, this reaches UIKit controls and system UI.",
+    inputSchema: AppIdSchema.extend({
+      x: z.number().nonnegative(),
+      y: z.number().nonnegative(),
+      coordinateSpace: z.enum(["points", "normalized"]).default("normalized"),
+    }),
+    annotations: { destructiveHint: true, idempotentHint: false },
+  }, async ({ appId, x, y, coordinateSpace }) => invoke(() => {
+    if (coordinateSpace === "normalized" && (x > 1 || y > 1)) {
+      throw new MengineRuntimeError("invalid_request", "normalized iOS UI coordinates must be between 0 and 1");
+    }
+    return manager.iosUiTap(appId, x, y, coordinateSpace);
+  }));
+
+  server.registerTool("ios_ui_tap_element", {
+    title: "Tap native iOS accessibility element",
+    description: "Find a UIKit or system element through XCTest and tap it by accessibility identifier, label, or predicate.",
+    inputSchema: AppIdSchema.extend({
+      using: z.enum(["accessibility_id", "label", "predicate"]).default("accessibility_id"),
+      value: z.string().min(1),
+      index: z.number().int().nonnegative().default(0),
+    }),
+    annotations: { destructiveHint: true, idempotentHint: false },
+  }, async ({ appId, using, value, index }) => invoke(() => manager.iosUiTapElement(appId, using, value, index)));
+
+  server.registerTool("ios_ui_press_button", {
+    title: "Press physical iOS device button",
+    description: "Press the Home, Volume Up, or Volume Down hardware control through the system XCTest device API.",
+    inputSchema: AppIdSchema.extend({
+      button: z.enum(["home", "volume_up", "volume_down"]),
+    }),
+    annotations: { destructiveHint: true, idempotentHint: false },
+  }, async ({ appId, button }) => invoke(() => manager.iosUiPressButton(appId, button)));
+
+  server.registerTool("ios_ui_alert", {
+    title: "Control native iOS system alert",
+    description: "Read alert text/buttons or accept/dismiss the active native iOS alert, optionally selecting a specific button label.",
+    inputSchema: AppIdSchema.extend({
+      action: z.enum(["text", "buttons", "accept", "dismiss"]),
+      buttonLabel: z.string().min(1).optional(),
+    }),
+    annotations: { destructiveHint: true, idempotentHint: false },
+  }, async ({ appId, action, buttonLabel }) => invoke(() => manager.iosUiAlert(appId, action, buttonLabel)));
+
   server.registerTool("frame_capture", {
     title: "Capture Mengine frame",
     description: "Capture a PNG from an offscreen render target in visible or hidden-render mode. The game or Simulator window does not need to be open, visible, or focused. Headless logic mode returns unsupported.",
@@ -370,6 +484,20 @@ export function createMengineMcpServer(manager: SessionManager, status: MengineM
       }
       return errorResult(error);
     }
+  });
+
+  server.registerTool("input_shake", {
+    title: "Emulate shaking a device",
+    description: "Inject a timed alternating accelerometer pattern that emulates shaking a physical phone, then settles at rest.",
+    inputSchema: AppIdSchema.extend({
+      amplitudeG: z.number().min(0.1).max(20).default(4.5),
+      durationMs: z.number().int().min(100).max(5_000).default(1_200),
+      frequencyHz: z.number().int().min(5).max(50).default(50),
+    }),
+    annotations: { destructiveHint: true, idempotentHint: false },
+  }, async ({ appId, amplitudeG, durationMs, frequencyHz }) => {
+    const steps = makeShakeInputSteps(amplitudeG, durationMs, frequencyHz);
+    return invoke(() => manager.request(appId, "input_sequence", { steps }, durationMs + 5_000));
   });
 
   server.registerTool("script_reload_module", {
@@ -429,6 +557,36 @@ export function createMengineMcpServer(manager: SessionManager, status: MengineM
   }
 
   return server;
+}
+
+export function makeShakeInputSteps(
+  amplitudeG: number,
+  durationMs: number,
+  frequencyHz: number,
+): Array<Record<string, unknown>> {
+  const intervalMs = Math.max(1, Math.round(1_000 / frequencyHz));
+  const sampleCount = Math.max(1, Math.round(durationMs / intervalMs));
+  const steps: Array<Record<string, unknown>> = [];
+
+  for (let index = 0; index !== sampleCount; ++index) {
+    const direction = index % 2 === 0 ? 1 : -1;
+    steps.push({
+      type: "accelerometer",
+      params: {
+        x: direction * amplitudeG,
+        y: direction * amplitudeG * -0.35,
+        z: 1,
+      },
+    });
+    steps.push({ type: "delay", milliseconds: intervalMs });
+  }
+
+  for (let index = 0; index !== 18; ++index) {
+    steps.push({ type: "accelerometer", params: { x: 0, y: 0, z: 1 } });
+    steps.push({ type: "delay", milliseconds: intervalMs });
+  }
+
+  return steps;
 }
 
 export function createUnconfiguredMengineMcpServer(status: MengineMcpStatus): McpServer {

@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { loadDescriptor } from "../src/descriptor.js";
+import { findCoreDeviceTunnelHost } from "../src/coreDevice.js";
 import {
   SessionManager,
   makeLaunchArguments,
@@ -12,6 +13,16 @@ import {
   resolveExecutableCommand,
   type LaunchMode,
 } from "../src/session.js";
+
+test("CoreDevice tunnel selection prefers a newly created private IPv6 utun address", () => {
+  const host = findCoreDeviceTunnelHost({
+    en0: [{ address: "192.168.1.2", netmask: "255.255.255.0", family: "IPv4", mac: "00:00:00:00:00:00", internal: false, cidr: "192.168.1.2/24" }],
+    utun3: [{ address: "fd00:old::2", netmask: "ffff:ffff:ffff:ffff::", family: "IPv6", mac: "00:00:00:00:00:00", internal: false, cidr: "fd00:old::2/64", scopeid: 0 }],
+    utun4: [{ address: "fd00:new::2", netmask: "ffff:ffff:ffff:ffff::", family: "IPv6", mac: "00:00:00:00:00:00", internal: false, cidr: "fd00:new::2/64", scopeid: 0 }],
+  }, new Set(["fd00:old::2"]));
+
+  assert.equal(host, "fd00:new::2");
+});
 
 function variables(mode: LaunchMode) {
   return {

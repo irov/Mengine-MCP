@@ -166,6 +166,73 @@
           "$ref": "#/$defs/command",
           "description": "Fallback command used to terminate a detached mobile runtime when orderly MCP shutdown is unavailable or times out."
         },
+        "coreDeviceTunnel": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "deviceId"
+          ],
+          "properties": {
+            "deviceId": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Physical iOS device identifier used to create an automatic LLDB/CoreDevice USB tunnel."
+            }
+          }
+        },
+        "iosUiAutomation": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Optional lightweight XCTest runner used to inspect and control native UIKit views and system alerts on iOS.",
+          "required": [
+            "deviceId",
+            "targetBundleId",
+            "runnerCommand"
+          ],
+          "properties": {
+            "provider": {
+              "const": "xctest",
+              "default": "xctest"
+            },
+            "deviceId": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Physical device identifier used for the CoreDevice tunnel and XCTest destination."
+            },
+            "targetBundleId": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Bundle identifier of the application whose native UI is controlled."
+            },
+            "runnerCommand": {
+              "$ref": "#/$defs/command",
+              "description": "Command that builds or starts the XCTest UI runner. Runtime placeholders iosUiHost, iosUiPort, iosUiToken, and iosUiTargetBundleId are expanded when the session starts."
+            },
+            "cwd": {
+              "type": "string",
+              "description": "Working directory for startCommand, relative to the game workspace root."
+            },
+            "environment": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "default": {}
+            },
+            "startupTimeoutMs": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 600000,
+              "default": 180000
+            },
+            "requestTimeoutMs": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 300000,
+              "default": 30000
+            }
+          }
+        },
         "logicHostProfile": {
           "type": "string",
           "description": "Desktop profile used for mobile headless-logic launches."

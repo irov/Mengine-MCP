@@ -29,6 +29,55 @@
           "portForwardCommand": ["adb", "reverse", "tcp:{mcpPort}", "tcp:{mcpPort}"],
           "stopCommand": ["adb", "shell", "am", "force-stop", "org.example.game"],
           "logicHostProfile": "macos-dev"
+        },
+        {
+          "id": "ios-device-dev",
+          "platform": "ios",
+          "command": "xcrun",
+          "args": [
+            "devicectl",
+            "device",
+            "process",
+            "launch",
+            "--device",
+            "YOUR_DEVICE_UDID",
+            "--terminate-existing",
+            "org.example.game"
+          ],
+          "coreDeviceTunnel": {
+            "deviceId": "YOUR_DEVICE_UDID"
+          },
+          "iosUiAutomation": {
+            "provider": "xctest",
+            "deviceId": "YOUR_DEVICE_UDID",
+            "targetBundleId": "org.example.game",
+            "runnerCommand": [
+              "xcodebuild",
+              "-project",
+              "ios/MengineMCPUIAutomation/MengineMCPUIAutomation.xcodeproj",
+              "-scheme",
+              "MengineMCPUIAutomation",
+              "-configuration",
+              "Debug",
+              "-destination",
+              "id=YOUR_DEVICE_UDID",
+              "-derivedDataPath",
+              ".mengine/.cache/ios-ui-runner",
+              "-allowProvisioningUpdates",
+              "-allowProvisioningDeviceRegistration",
+              "DEVELOPMENT_TEAM=YOUR_DEVELOPMENT_TEAM",
+              "CODE_SIGN_STYLE=Automatic",
+              "COMPILER_INDEX_STORE_ENABLE=NO",
+              "MENGINE_MCP_UI_HOST={iosUiHost}",
+              "MENGINE_MCP_UI_PORT={iosUiPort}",
+              "MENGINE_MCP_UI_TOKEN={iosUiToken}",
+              "MENGINE_MCP_UI_TARGET_BUNDLE_ID={iosUiTargetBundleId}",
+              "test"
+            ],
+            "startupTimeoutMs": 300000,
+            "requestTimeoutMs": 60000
+          },
+          "logicHostProfile": "macos-dev"
         }
       ],
       "scriptRoots": [

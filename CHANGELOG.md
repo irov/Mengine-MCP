@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Add lightweight XCTest UI runner-backed `ios_ui_*` tools for physical-screen taps, accessibility elements, hardware buttons, screenshots, and native/system alerts without Appium or WebDriverAgent.
+
+## 0.3.5
+
+- Add automatic LLDB/CoreDevice USB tunnels for physical iOS launch profiles, including dynamic tunnel-host discovery and session cleanup.
+- Fix non-empty input sequences being rejected before execution.
+
+## 0.3.4
+
+- Add raw accelerometer input and a high-level shake command for physical-device motion automation.
+- Allow machine-local descriptor variables for device identifiers, LAN hosts, and local build paths.
+
 ## 0.3.3
 
 - Add profile-scoped managed macOS builds under `.mengine/.cache/build/<profileId>` with explicit `app_build` and `app_clean` tools.
